@@ -28,6 +28,29 @@
 
 当前不是完整三维声波或弹性波波动方程正演，没有自由表面、PML、模式转换、真实体散射、多次波、衰减或各向异性。
 
+## Devito acoustic 当前假设
+
+Stage 2B 已安装 Devito 并实现 `devito_acoustic_3d` 后端入口。该后端的物理方程是三维 acoustic 标量声波方程：
+
+```text
+m * u.dt2 - laplace(u) = source
+m = 1 / vp^2
+```
+
+它与 `kinematic` 的区别是：Devito acoustic 会在三维速度网格上推进波场，因此一旦 runtime 可用，就可以输出真实声波炮集和标量波场快照。
+
+当前本机 Windows 原生 `myvoid` 状态是：
+
+```text
+Devito 可导入：True
+Devito 版本：4.8.22
+Devito Operator runtime 可用：False
+```
+
+因此当前默认结果仍来自 `kinematic`。项目不会把 Devito runtime 失败时的占位结果说成真实三维声波正演。
+
+即使 Devito acoustic 跑通，它仍不是完整三维弹性波正演，不能直接输出 DAS 轴向应变。
+
 ## DAS 当前近似
 
 当前 DAS 光纤已能用 `receiver_polyline` 表达并采样为 `receiver_xyz`，同时记录 gauge length metadata。但是当前记录仍是点接收器近似，不是真实 gauge-length averaged axial strain。
@@ -54,6 +77,6 @@
 
 ## 后续方向
 
-1. Devito：先接入三维声波方程正演，输出炮集和真实声波场快照。
+1. Devito：优先在 WSL/Linux 或官方 Docker 中验证当前三维声波方程后端，输出炮集和真实声波场快照。
 2. OpenSWPC：作为外部三维弹性/黏弹性正演程序，推进真实 DAS 轴向应变。
 3. Notebook：每轮算法推进后同步更新，清理旧参数和旧结论，作为项目进度把控入口。

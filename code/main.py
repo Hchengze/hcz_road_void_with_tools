@@ -9,20 +9,24 @@
 5. 输出炮集、速度模型切片、定位切片和运行摘要。
 
 重要边界：当前默认后端仍是 `kinematic`。它不是完整三维声波/弹性波方程
-求解器，也不输出真实波场快照或真实 DAS gauge-length 轴向应变。Stage 2A
-的目标是把 Devito/OpenSWPC 等真实正演后端的接入口和数据结构准备好。
+求解器，也不输出真实波场快照或真实 DAS gauge-length 轴向应变。Stage 2B
+新增 `--backend devito_acoustic_3d` 入口；该入口只有在 Devito import、JIT
+编译和极小 Operator smoke test 全部通过时才会运行真实三维声波正演。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
 from hcz_road_void.forward import (
     DevitoBackend,
+    DevitoForwardConfig,
+    DevitoRuntimeStatus,
     ForwardConfig,
     KinematicDiffractionBackend,
     OpenSWPCBackend,
@@ -45,6 +49,7 @@ from hcz_road_void.visualization import (
     plot_localization_slices,
     plot_synthetic_gather,
     plot_velocity_model_slices,
+    save_scalar_wavefield_snapshots,
     unavailable_wavefield_snapshots,
 )
 
@@ -53,7 +58,7 @@ def build_stage1_scene() -> dict[str, object]:
     """构建默认三维道路 DAS + 锤击地下空洞场景。
 
     函数名保留 `stage1` 是为了兼容上一轮测试和 Notebook，但返回内容已经包含
-    Stage 2A 所需的体异常和速度网格。坐标约定始终为：
+    Stage 2A/2B 所需的体异常、速度网格和 Devito 后端输入。坐标约定始终为：
 
     - `x`：沿道路或光纤方向，单位 m；
     - `y`：横穿道路方向，单位 m；
@@ -89,7 +94,7 @@ def build_stage1_scene() -> dict[str, object]:
     )
     sampled_receivers = receiver_polyline.sample_channels()
 
-    # Stage 1 点异常模型继续用于当前定位闭环；Stage 2A 同步给出体异常表达。
+    # Stage 1 点异常模型继续用于当前定位闭环；Stage 2A/2B 同步给出体异常表达。
     void_model = VoidModel3D(void_xyz=(40.0, 7.5, 2.0), void_radius_m=1.0)
     void_body = VoidBody3D(
         center_xyz=void_model.void_xyz,
@@ -99,7 +104,7 @@ def build_stage1_scene() -> dict[str, object]:
     )
     scatterer_proxy_xyz = sample_void_body_as_scatterers(void_body, spacing_m=0.5)
 
-    # 三维速度网格用于后续真实波动方程正演。本轮只输出模型，不用它调定位误差。
+    # 三维速度网格用于真实波动方程后端输入。本轮仍不使用它调定位误差。
     base_velocity_grid = build_uniform_road_velocity_grid(
         road_length_m=road_length_m,
         road_width_m=road_width_m,
@@ -135,8 +140,18 @@ def build_stage1_scene() -> dict[str, object]:
     }
 
 
-def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, object]:
-    """运行默认三维示例，并把图像、数据和 JSON 摘要写入输出目录。"""
+def run(
+    output_dir: str | Path = "outputs",
+    quiet: bool = False,
+    backend_name: str = "kinematic",
+) -> dict[str, object]:
+    """运行三维示例，并把图像、数据和 JSON 摘要写入输出目录。
+
+    `backend_name="kinematic"` 是稳定默认值，继续服务三维几何、定位闭环和
+    不确定性检查。`backend_name="devito_acoustic_3d"` 会尝试运行真实 Devito
+    acoustic 三维波动方程后端；如果当前环境只能 import Devito 但不能执行
+    Operator，会抛出清楚的中文错误。
+    """
 
     scene = build_stage1_scene()
     output_path = Path(output_dir)
@@ -159,9 +174,23 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
     kinematic_backend = KinematicDiffractionBackend()
     devito_backend = DevitoBackend()
     openswpc_backend = OpenSWPCBackend()
+    devito_status = devito_backend.runtime_status()
+
+    if backend_name == "devito_acoustic_3d":
+        return _run_devito_scene(
+            scene=scene,
+            output_path=output_path,
+            quiet=quiet,
+            devito_backend=devito_backend,
+            openswpc_backend=openswpc_backend,
+            devito_status=devito_status,
+        )
+    if backend_name != "kinematic":
+        raise ValueError("backend_name 只能是 'kinematic' 或 'devito_acoustic_3d'。")
+
     backend = kinematic_backend
 
-    # 当前默认后端仍使用单点绕射中心。体异常和速度网格是 Stage 2A 的正演升级准备。
+    # 当前默认后端仍使用单点绕射中心。体异常和速度网格服务 Stage 2B Devito 后端准备。
     forward = backend.run_forward(scene, config)
 
     localization = travel_time_energy_stack(
@@ -256,7 +285,12 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         "supports_wavefield_snapshots": backend_metadata["supports_wavefield_snapshots"],
         "supports_das_strain": backend_metadata["supports_das_strain"],
         "approximation": backend_metadata["approximation"],
-        "devito_available": devito_backend.is_available(),
+        "devito_available": devito_status.runtime_available,
+        "devito_import_available": devito_status.import_available,
+        "devito_runtime_available": devito_status.runtime_available,
+        "devito_version": devito_status.version,
+        "devito_compiler_path": devito_status.compiler_path,
+        "devito_runtime_message": devito_status.message,
         "openswpc_available": openswpc_backend.is_available(),
         "wavefield_snapshot_type": wavefield_status.snapshot_type,
         "is_true_wave_equation_wavefield": wavefield_status.is_true_wave_equation_wavefield,
@@ -285,7 +319,8 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         "wavefield_status": wavefield_status.as_dict(),
         "assumptions": [
             "当前默认正演后端是三维运动学点绕射近似。",
-            "当前不是完整三维声波或弹性波波动方程正演。",
+            "Devito 已安装时仍需通过 JIT/Operator smoke test 才能视为运行可用。",
+            "当前默认运行不是完整三维声波或弹性波波动方程正演。",
             "体异常已能写入速度网格，但运动学后端仍默认使用中心点作为等效绕射体。",
             "DAS 光纤当前仍是 polyline 采样点接收器近似，不是真实 gauge-length averaged axial strain。",
             "定位模块用于验证三维几何、数据结构和流程贯通，当前不以定位误差最小为核心验收指标。",
@@ -306,10 +341,13 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         json.dump(summary, file, indent=2, ensure_ascii=False)
 
     if not quiet:
-        print("Stage 2A 三维道路 DAS + 锤击地下空洞正演过渡原型")
+        print("Stage 2B 三维道路 DAS + 锤击地下空洞正演过渡原型")
         print("坐标系统：x 沿道路/光纤，y 横穿道路，depth 向下为正")
         print(f"当前正演后端：{summary['backend_name']}")
-        print(f"Devito 可用：{summary['devito_available']}")
+        print(f"Devito 可导入：{summary['devito_import_available']}")
+        print(f"Devito 版本：{summary['devito_version']}")
+        print(f"Devito 运行可用：{summary['devito_runtime_available']}")
+        print(f"Devito 运行诊断：{summary['devito_runtime_message']}")
         print(f"OpenSWPC 可用：{summary['openswpc_available']}")
         print(f"当前异常体表示：{summary['void_representation']}")
         print(f"当前是否完整波动方程正演：{summary['is_wave_equation_solver']}")
@@ -337,12 +375,174 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
     return summary
 
 
+def _run_devito_scene(
+    scene: dict[str, object],
+    output_path: Path,
+    quiet: bool,
+    devito_backend: DevitoBackend,
+    openswpc_backend: OpenSWPCBackend,
+    devito_status: DevitoRuntimeStatus,
+) -> dict[str, object]:
+    """运行 Devito acoustic 后端，并保存真实声波炮集和快照。
+
+    该函数只在用户显式选择 `--backend devito_acoustic_3d` 时调用。它不运行
+    当前 travel-time energy stack 定位，因为 Stage 2B 的验收重点是正演后端、
+    速度模型、炮集和波场输出，不是定位误差。
+    """
+
+    if not devito_backend.is_available():
+        raise RuntimeError(
+            "无法运行 Devito 三维 acoustic 后端。"
+            f"Devito import 状态：{devito_status.import_available}；"
+            f"版本：{devito_status.version}；"
+            f"运行诊断：{devito_status.message}；"
+            f"细节：{devito_status.details}"
+        )
+
+    velocity_grid = scene["velocity_grid"]
+    void_model = scene["void_model"]
+    void_body = scene["void_body"]
+    sampled_receivers = scene["sampled_receivers"]
+    source_xyz = scene["source_xyz"]
+
+    # Stage 2B 只跑一个很小的 Devito acoustic 示例。默认选择首炮、中间炮和末炮，
+    # 既覆盖道路两端和中部，又避免最小后端第一次运行时间过长。
+    source_count = len(source_xyz)
+    devito_config = DevitoForwardConfig(
+        dt_s=0.00025,
+        nt=220,
+        wavelet_frequency_hz=70.0,
+        snapshot_interval=25,
+        source_indices=(0, source_count // 2, source_count - 1),
+    )
+    forward = devito_backend.run_forward(scene, devito_config)
+    forward_metadata = dict(forward.metadata)
+    snapshot_cube = forward_metadata.pop("wavefield_snapshot_array", None)
+    snapshot_times_s = forward_metadata.pop("wavefield_snapshot_times_s", None)
+
+    velocity_grid.save_npz(output_path / "velocity_model_3d.npz")
+    plot_velocity_model_slices(
+        output_path / "velocity_model_slices.png",
+        velocity_grid=velocity_grid,
+        x_m=void_model.void_xyz.x,
+        y_m=void_model.void_xyz.y,
+        depth_m=void_model.void_xyz.depth,
+    )
+    np.savez_compressed(
+        output_path / "devito_synthetic_data.npz",
+        data=forward.data,
+        time_axis_s=forward.time_axis_s,
+        source_xyz=np.asarray(forward.source_xyz),
+        receiver_xyz=np.asarray(forward.receiver_xyz),
+    )
+    plot_synthetic_gather(
+        output_path / "devito_synthetic_gather.png",
+        data=forward.data,
+        time_axis_s=forward.time_axis_s,
+        receiver_xyz=sampled_receivers.receivers,
+        source_index=0,
+    )
+
+    if snapshot_cube is None or snapshot_times_s is None:
+        wavefield_status = unavailable_wavefield_snapshots(devito_backend.name)
+    else:
+        wavefield_status = save_scalar_wavefield_snapshots(
+            output_dir=output_path / "devito_wavefield_snapshots",
+            snapshot_cube=snapshot_cube,
+            x_m=velocity_grid.x_m,
+            y_m=velocity_grid.y_m,
+            depth_m=velocity_grid.depth_m,
+            snapshot_times_s=snapshot_times_s,
+            fixed_y_m=void_model.void_xyz.y,
+            animation_path=output_path / "devito_wavefield_animation.gif",
+            backend_name=devito_backend.name,
+        )
+
+    summary = {
+        "stage": "Stage 2B",
+        "backend_name": forward_metadata["backend_name"],
+        "physics_type": forward_metadata["physics_type"],
+        "is_wave_equation_solver": forward_metadata["is_wave_equation_solver"],
+        "is_elastic_solver": forward_metadata["is_elastic_solver"],
+        "supports_wavefield_snapshots": forward_metadata["supports_wavefield_snapshots"],
+        "supports_das_strain": forward_metadata["supports_das_strain"],
+        "is_true_wave_equation_wavefield": wavefield_status.is_true_wave_equation_wavefield,
+        "wavefield_snapshot_type": wavefield_status.snapshot_type,
+        "wavefield_component": "scalar acoustic field",
+        "devito_import_available": devito_status.import_available,
+        "devito_runtime_available": devito_status.runtime_available,
+        "devito_version": devito_status.version,
+        "devito_compiler_path": devito_status.compiler_path,
+        "devito_runtime_message": devito_status.message,
+        "openswpc_available": openswpc_backend.is_available(),
+        "road_length_m": float(scene["road_length_m"]),
+        "road_width_m": float(scene["road_width_m"]),
+        "fiber_y_m": float(scene["fiber_y_m"]),
+        "source_y_m": float(scene["source_y_m"]),
+        "true_void_xyz": void_model.void_xyz.xyz,
+        "void_body": void_body.metadata,
+        "uses_velocity_grid": True,
+        "uses_void_body": True,
+        "data_shape": list(forward.data.shape),
+        "source_xyz_used": [list(coord) for coord in forward.source_xyz],
+        "receiver_count": len(forward.receiver_xyz),
+        "dt_s": devito_config.dt_s,
+        "nt": devito_config.nt,
+        "localization_accuracy_is_primary_metric": False,
+        "localization_run": False,
+        "assumptions": [
+            "Devito 后端是三维 acoustic 标量声波方程正演，不是三维弹性波正演。",
+            "当前波场快照是标量声波场，不是真实 DAS 轴向应变。",
+            "Stage 2B 暂不以定位误差为核心验收指标。",
+            "当前最小 Devito 模型未加入 PML、自由表面和真实 DAS gauge-length 算子。",
+        ],
+        "forward_metadata": forward_metadata,
+        "wavefield_status": wavefield_status.as_dict(),
+        "outputs": {
+            "velocity_model_3d": str(output_path / "velocity_model_3d.npz"),
+            "velocity_model_slices": str(output_path / "velocity_model_slices.png"),
+            "devito_synthetic_data": str(output_path / "devito_synthetic_data.npz"),
+            "devito_synthetic_gather": str(output_path / "devito_synthetic_gather.png"),
+            "devito_wavefield_snapshots": str(output_path / "devito_wavefield_snapshots"),
+            "devito_wavefield_animation": str(output_path / "devito_wavefield_animation.gif"),
+            "devito_forward_summary": str(output_path / "devito_forward_summary.json"),
+        },
+    }
+    with (output_path / "devito_forward_summary.json").open("w", encoding="utf-8") as file:
+        json.dump(summary, file, indent=2, ensure_ascii=False)
+
+    if not quiet:
+        print("Stage 2B Devito 三维 acoustic 正演")
+        print("坐标系统：x 沿道路/光纤，y 横穿道路，depth 向下为正")
+        print(f"当前正演后端：{summary['backend_name']}")
+        print(f"Devito 版本：{summary['devito_version']}")
+        print(f"当前是否完整波动方程正演：{summary['is_wave_equation_solver']}")
+        print(f"当前是否弹性波正演：{summary['is_elastic_solver']}")
+        print(f"当前是否支持真实波场快照：{summary['supports_wavefield_snapshots']}")
+        print(f"当前是否支持真实 DAS 轴向应变：{summary['supports_das_strain']}")
+        print(f"数据维度 n_sources x n_receivers x n_times: {summary['data_shape']}")
+        print(f"波场快照类型：{summary['wavefield_snapshot_type']}")
+        print(f"输出已保存到: {output_path.resolve()}")
+
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", default="outputs", help="输出目录。")
     parser.add_argument("--quiet", action="store_true", help="不打印终端摘要。")
+    parser.add_argument(
+        "--backend",
+        default="kinematic",
+        choices=["kinematic", "devito_acoustic_3d"],
+        help="正演后端：默认 kinematic；显式选择 devito_acoustic_3d 时尝试运行 Devito 三维声波方程。",
+    )
     args = parser.parse_args()
-    run(output_dir=args.output_dir, quiet=args.quiet)
+    try:
+        run(output_dir=args.output_dir, quiet=args.quiet, backend_name=args.backend)
+    except RuntimeError as exc:
+        print(f"运行失败：{exc}", file=sys.stderr)
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

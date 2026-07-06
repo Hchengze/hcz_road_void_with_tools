@@ -6,13 +6,21 @@
 """
 
 from hcz_road_void.forward.backends.base import ForwardBackend
-from hcz_road_void.forward.backends.devito_backend import DevitoBackend
+from hcz_road_void.forward.backends.devito_backend import (
+    DevitoBackend,
+    DevitoForwardConfig,
+    DevitoRuntimeStatus,
+    velocity_grid_to_devito_inputs,
+)
 from hcz_road_void.forward.backends.kinematic_backend import KinematicDiffractionBackend
 from hcz_road_void.forward.backends.openswpc_backend import OpenSWPCBackend
 
 __all__ = [
     "DevitoBackend",
+    "DevitoForwardConfig",
+    "DevitoRuntimeStatus",
     "ForwardBackend",
     "KinematicDiffractionBackend",
     "OpenSWPCBackend",
+    "velocity_grid_to_devito_inputs",
 ]

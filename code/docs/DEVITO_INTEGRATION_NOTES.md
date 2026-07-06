@@ -1,113 +1,178 @@
 # Devito 三维声波正演接入笔记
 
-## 当前状态
+## 当前 Stage 2B 状态
 
-1. 本地路径：`tools/devito-main`。
-2. `myvoid` 环境可用性：不可用。
-3. 检查命令：`D:\HczApp\Anaconda\envs\myvoid\python.exe -c "import devito; print(devito.__version__)"`。
-4. 当前结果：`ModuleNotFoundError: No module named 'devito'`。
-5. 本轮是否建议安装：暂不安装。Stage 2A 先完成接口、速度网格、体异常和文档；下一轮再评估安装 Devito 及编译器依赖。
+1. 本地源码审计路径：`tools/devito-main`。
+2. 目标运行环境：`D:\HczApp\Anaconda\envs\myvoid\python.exe`。
+3. Devito 安装状态：已安装，可 import。
+4. 当前版本：`devito 4.8.22`。
+5. 当前 runtime 状态：**尚不能在 Windows 原生 `myvoid` 中成功执行 Devito Operator**。
+6. 当前项目处理方式：已实现 `DevitoBackend`、版本检测、runtime smoke test、Devito acoustic 运行路径和清晰中文错误；默认流程仍使用 `kinematic`。
 
-## 本地示例入口
+## 本轮安装命令
 
-重点阅读位置：
+首次尝试：
 
-1. `tools/devito-main/examples/seismic/acoustic/acoustic_example.py`
-2. `tools/devito-main/examples/seismic/acoustic/wavesolver.py`
-3. `tools/devito-main/examples/seismic/acoustic/operators.py`
-4. `tools/devito-main/examples/seismic/model.py`
-5. `tools/devito-main/examples/seismic/source.py`
-6. `tools/devito-main/examples/seismic/tutorials/01_modelling.ipynb`
-7. `tools/devito-main/examples/seismic/tutorials/08_snapshotting.ipynb`
-8. `tools/devito-main/examples/seismic/elastic/elastic_example.py`
+```powershell
+D:\HczApp\Anaconda\envs\myvoid\python.exe -m pip install devito
+```
 
-## 3D acoustic 核心流程
+该命令因镜像 SSL EOF 失败。
 
-1. 用 `Grid` 定义三维计算域、网格点数、物理尺寸和坐标原点。
-2. 用 `Model` 写入速度模型、网格间距、吸收边界层和物理参数。
-3. 用 `TimeFunction` 表示随时间推进的波场，例如声压或标量波场。
-4. 用 `RickerSource` 或 `SparseTimeFunction` 表示锤击源。需要把本项目 `source_xyz=(x,y,depth)` 转为 Devito 的稀疏坐标。
-5. 用 `Receiver` 表示 DAS polyline 采样点。当前仍是点接收器近似，不是真实 DAS 轴向应变。
-6. 用 `Operator` 生成并执行有限差分时间推进。
-7. 把 `Receiver.data` 重排为本项目 `n_sources x n_receivers x n_times`。
+成功安装命令：
 
-## 关键对象说明
+```powershell
+D:\HczApp\Anaconda\envs\myvoid\python.exe -m pip install devito --index-url https://pypi.org/simple
+```
 
-- `Grid`：三维网格容器，对应本项目 `VelocityGrid3D.x_m/y_m/depth_m`。
-- `Model`：物性模型，下一轮应由 `VelocityGrid3D.vp_mps` 构建。
-- `TimeFunction`：波场变量，后续可用于保存波场快照。
-- `SparseTimeFunction`：稀疏源或接收插值对象。
-- `Operator`：由符号方程生成的计算核。
-- `RickerSource`：Ricker 子波震源，适合锤击近似的第一版声波源。
-- `Receiver`：接收点数组，第一版映射为 DAS 通道点。
+为 Devito JIT 补充 MinGW/GCC 工具链：
 
-## 本项目坐标到 Devito 的映射
+```powershell
+D:\HczApp\Anaconda\Scripts\conda.exe install -n myvoid -c conda-forge -y m2w64-toolchain
+```
 
-本项目坐标约定为 `x` 沿道路、`y` 横穿道路、`depth` 向下为正。Devito 需要一个规则三维网格。建议下一轮采用：
+安装后可找到：
 
-1. `origin=(x_min, y_min, depth_min)`，通常为 `(0,0,0)`；
-2. `spacing=(dx, dy, dz)`，由 `VelocityGrid3D.spacing_m` 给出；
-3. `shape=(nx, ny, ndepth)`，由 `VelocityGrid3D.shape` 给出；
-4. `source.coordinates.data[:, :] = source_xyz`；
-5. `receiver.coordinates.data[:, :] = receiver_xyz`。
+```text
+D:\HczApp\Anaconda\envs\myvoid\Library\mingw-w64\bin\gcc.EXE
+```
 
-需要特别验证 Devito 的第三坐标是否按数学 `z` 轴处理；本项目会把它解释为 `depth`，绘图时再保持向下为正。
+## 新增或变动依赖
 
-## source、receiver 和 model 转换
+Devito 安装引入或调整了以下关键包：
 
-1. `source_xyz`：每个锤击点建立一个 source，或多炮循环逐炮运行。
-2. `receiver_xyz`：由 `ReceiverPolyline3D.sample_channels()` 生成，直接作为 receiver coordinates。
-3. `VelocityModel3D`：常速度元数据，只能生成均匀 `VelocityGrid3D`。
-4. `VelocityGrid3D`：下一轮的 Devito `Model` 主要输入。
-5. `VoidBody3D`：应先嵌入 `VelocityGrid3D`，再交给 Devito，不应再作为单点散射体。
+1. `devito 4.8.22`
+2. `numpy 2.4.3`
+3. `sympy 1.14.0`
+4. `cgen 2025.1`
+5. `codepy 2023.1`
+6. `py-cpuinfo 9.0.0`
+7. `multidict 6.2.0`
+8. `anytree 2.13.0`
+9. `pytools 2026.1.1`
+10. `siphash24 1.8`
+11. `mpmath 1.3.0`
+12. `m2w64-toolchain 5.3.0` 及其 MinGW/GCC 依赖包
 
-## 输出转换
+安装时出现提示：
 
-1. `Receiver.data` 转为 `ForwardResult3D.data`。
-2. 维度必须统一为 `n_sources x n_receivers x n_times`。
-3. `ForwardResult3D.metadata` 必须包含：
-   - `backend_name="devito_acoustic_3d"`
-   - `physics_type="acoustic_wave_equation"`
-   - `is_wave_equation_solver=True`
-   - `is_elastic_solver=False`
-   - `supports_wavefield_snapshots=True`
-   - `supports_das_strain=False`
+```text
+mkl-fft 2.2.0 requires mkl, which is not installed.
+```
 
-## 波场快照和动图
+当前项目测试仍可通过；该提示记录为环境风险，后续若出现 NumPy/MKL 相关错误再单独处理。
 
-Devito 快照路线：
+## Devito runtime smoke test 结论
 
-1. 用子采样 `TimeFunction` 或保存间隔记录波场；
-2. 输出 `outputs/wavefield_snapshots/snapshot_000.png` 等；
-3. 保存快照数据为 `.npz`；
-4. 由 Matplotlib 或 imageio 生成 `outputs/wavefield_animation.gif`；
-5. metadata 中明确物理量是声压/标量波场，不是弹性位移应变。
+检查命令：
 
-## CFL、网格和道路浅层尺度
+```powershell
+D:\HczApp\Anaconda\envs\myvoid\python.exe -c "import devito; print(devito.__version__)"
+```
 
-道路模型尺度小、频率高，网格间距必须足够小以避免数值频散。下一轮需要系统确定：
+结果：
 
-1. 最小速度；
-2. 最高有效频率；
-3. 每波长网格点数；
-4. 时间步长 CFL；
-5. 吸收边界厚度；
-6. 地表自由面是否先忽略或专门实现。
+```text
+4.8.22
+```
 
-## 当前最小接入目标
+极小 Operator smoke test 当前失败，诊断摘要：
 
-下一轮建议只实现一个可运行的 Devito 3D acoustic 小模型：
+```text
+Devito 可导入，但极小 Operator 运行失败。
+codepy.CompileError: module compilation failed
+```
 
-1. 使用 `VelocityGrid3D`；
-2. 单炮或少量炮；
-3. DAS 点接收器；
-4. 输出炮集和真实声波波场快照；
-5. 不做 DAS 轴向应变；
-6. 不调定位误差。
+已确认的 Windows 原生阻塞点：
+
+1. Windows 标准 Python 没有 `os.getuid`，Devito/pytools JIT 路径会访问该函数。
+2. Devito 默认内存分配器依赖 POSIX `posix_memalign`，Windows 原生 libc 不提供同样接口。
+3. 补齐 MinGW/GCC 后，CodePy/MinGW 对 Windows 反斜杠路径处理仍有问题，gcc 收到类似 `C:Users...devito-jitcache...c` 的路径并找不到源文件。
+4. Devito 上游 Docker 和 CI 示例主要围绕 Linux + gcc/clang/icx 环境；本机 Windows 原生不是最稳路线。
+
+## 本项目 DevitoBackend 当前能力
+
+已实现文件：
+
+```text
+code/hcz_road_void/forward/backends/devito_backend.py
+```
+
+已实现能力：
+
+1. `DevitoBackend.get_version()`：返回 Devito 版本。
+2. `DevitoBackend.runtime_status()`：区分 import 可用性和 Operator 运行可用性。
+3. `DevitoBackend.is_available()`：只在极小 Operator smoke test 成功时返回 `True`。
+4. `velocity_grid_to_devito_inputs()`：把 `VelocityGrid3D` 转成 Devito `Grid` 所需的 `shape/origin/extent/spacing`。
+5. `DevitoForwardConfig`：保存 Devito acoustic 时间步长、步数、主频、差分阶数和快照间隔。
+6. `DevitoBackend.run_forward()`：在 runtime 可用的机器上运行最小三维 acoustic 方程路径。
+7. `main.py --backend devito_acoustic_3d`：显式尝试 Devito 后端；当前 Windows 原生环境下给出中文错误，不伪造结果。
+
+## Devito 3D acoustic 核心流程
+
+当前代码采用最小标量 acoustic 方程：
+
+```text
+m * u.dt2 - laplace(u) = source
+m = 1 / vp^2
+```
+
+本项目映射关系：
+
+1. `VelocityGrid3D.x_m/y_m/depth_m` → Devito `Grid(shape, origin, extent)`。
+2. `VelocityGrid3D.vp_mps` → Devito `Function m=1/vp^2`。
+3. `source_xyz=(x,y,depth)` → Devito `SparseTimeFunction` source 坐标。
+4. `receiver_xyz=(x,y,depth)` → Devito `SparseTimeFunction` receiver 坐标。
+5. `Ricker` 子波 → source time series。
+6. `rec.data` → `ForwardResult3D.data`，顺序为 `n_sources x n_receivers x n_times`。
+7. `u.data` 抽样 → 波场快照数组，后续保存为 PNG/GIF。
+
+## 坐标约定
+
+项目坐标始终为：
+
+- `x`：沿道路或光纤方向；
+- `y`：横穿道路方向；
+- `depth`：向下为正。
+
+Devito acoustic 后端把 `depth` 作为规则网格第三维，不在后端内翻转坐标轴。只要 source、receiver、速度网格和可视化全部遵守同一约定，声波方程数学上不需要关心“向上/向下”的地理语义。
+
+## 波场快照和动图路线
+
+已新增：
+
+```text
+code/hcz_road_void/visualization/wavefield.py
+```
+
+核心函数：
+
+```text
+save_scalar_wavefield_snapshots(...)
+```
+
+当 Devito runtime 可用时，输出：
+
+```text
+code/outputs/devito_wavefield_snapshots/snapshot_000.png
+code/outputs/devito_wavefield_snapshots/snapshot_001.png
+...
+code/outputs/devito_wavefield_animation.gif
+```
+
+当前 Windows 原生 runtime 不可用，因此不会生成伪快照。
 
 ## 当前不做
 
-1. 不安装大型依赖。
-2. 不声称当前已实现 Devito 正演。
-3. 不把声波压力记录说成 DAS 轴向应变。
-4. 不做 Devito 弹性波或 FWI。
+1. 不把 acoustic 标量波场说成弹性波位移场。
+2. 不把 receiver 点压力记录说成真实 DAS 轴向应变。
+3. 不为降低当前定位误差修改定位目标函数。
+4. 不复制 Devito 核心源码进本项目。
+5. 不强行编译 OpenSWPC、SPECFEM3D、SW4、SeisCL 或 SAVA。
+
+## 下一步建议
+
+1. 优先在 WSL/Linux 或 Devito 官方 Docker 环境验证同一后端代码。
+2. 如果必须坚持 Windows 原生，需进一步研究 CodePy/MinGW 路径转义和 Devito allocator 替换，不建议把这作为主线。
+3. Devito acoustic 跑通后，再把输出接入定位模块做对比，但仍不以当前误差最小为 Stage 2B 验收指标。
+4. 真正 DAS 轴向应变应转向 Devito elastic 或 OpenSWPC 弹性/黏弹性后端。

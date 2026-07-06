@@ -7,9 +7,12 @@ OpenSWPC 时，应保持这里的三维几何接口不变。
 from hcz_road_void.forward.config import ForwardConfig
 from hcz_road_void.forward.backends import (
     DevitoBackend,
+    DevitoForwardConfig,
+    DevitoRuntimeStatus,
     ForwardBackend,
     KinematicDiffractionBackend,
     OpenSWPCBackend,
+    velocity_grid_to_devito_inputs,
 )
 from hcz_road_void.forward.kinematic import (
     predict_point_scatter_travel_time,
@@ -23,9 +26,12 @@ __all__ = [
     "ForwardBackend",
     "ForwardResult3D",
     "DevitoBackend",
+    "DevitoForwardConfig",
+    "DevitoRuntimeStatus",
     "KinematicDiffractionBackend",
     "OpenSWPCBackend",
     "predict_point_scatter_travel_time",
     "ricker_wavelet",
     "simulate_kinematic_diffraction",
+    "velocity_grid_to_devito_inputs",
 ]
