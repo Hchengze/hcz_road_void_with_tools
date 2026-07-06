@@ -1,9 +1,16 @@
-"""运行第一阶段三维道路地下空洞运动学正演与定位示例。
+"""运行三维道路 DAS + 锤击地下空洞探测算法原型。
 
-本脚本只负责组织一次完整演示：构建道路、DAS 光纤、锤击震源和
-地下空洞的三维几何，调用包内正演、定位、不确定性和绘图模块。
-核心算法不放在这里，便于后续把运动学近似替换为 Devito/OpenSWPC
-等高保真正演后端。
+本脚本是项目的端到端示例入口。它负责组织一次完整流程：
+
+1. 构建三维道路、DAS 光纤、锤击炮线和地下空洞几何；
+2. 生成三维速度网格，并把空洞表达为低速体异常；
+3. 使用统一正演后端接口运行默认的三维运动学点绕射正演；
+4. 运行三维 `x-y-depth` travel-time energy stack 定位；
+5. 输出炮集、速度模型切片、定位切片和运行摘要。
+
+重要边界：当前默认后端仍是 `kinematic`。它不是完整三维声波/弹性波方程
+求解器，也不输出真实波场快照或真实 DAS gauge-length 轴向应变。Stage 2A
+的目标是把 Devito/OpenSWPC 等真实正演后端的接入口和数据结构准备好。
 """
 
 from __future__ import annotations
@@ -14,28 +21,47 @@ from pathlib import Path
 
 import numpy as np
 
-from hcz_road_void.forward import ForwardConfig, simulate_kinematic_diffraction
+from hcz_road_void.forward import (
+    DevitoBackend,
+    ForwardConfig,
+    KinematicDiffractionBackend,
+    OpenSWPCBackend,
+)
 from hcz_road_void.geometry import Coordinate3D
 from hcz_road_void.localization import SearchGrid3D, travel_time_energy_stack
-from hcz_road_void.models import VelocityModel3D, VoidModel3D
+from hcz_road_void.models import (
+    VelocityModel3D,
+    VoidBody3D,
+    VoidModel3D,
+    build_uniform_road_velocity_grid,
+    embed_void_body_into_velocity_grid,
+    sample_void_body_as_scatterers,
+)
 from hcz_road_void.receivers import ReceiverPolyline3D
 from hcz_road_void.uncertainty import summarize_objective_uncertainty
-from hcz_road_void.visualization import plot_geometry_3d, plot_localization_slices, plot_synthetic_gather
+from hcz_road_void.visualization import (
+    ensure_wavefield_output_dir,
+    plot_geometry_3d,
+    plot_localization_slices,
+    plot_synthetic_gather,
+    plot_velocity_model_slices,
+    unavailable_wavefield_snapshots,
+)
 
 
 def build_stage1_scene() -> dict[str, object]:
-    """构建默认三维道路 DAS + 锤击空洞探测场景。
+    """构建默认三维道路 DAS + 锤击地下空洞场景。
 
-    坐标约定始终为：
+    函数名保留 `stage1` 是为了兼容上一轮测试和 Notebook，但返回内容已经包含
+    Stage 2A 所需的体异常和速度网格。坐标约定始终为：
 
-    - ``x``：沿道路和光纤方向；
-    - ``y``：横穿道路方向；
-    - ``depth``：向下为正，单位为 m。
+    - `x`：沿道路或光纤方向，单位 m；
+    - `y`：横穿道路方向，单位 m；
+    - `depth`：深度，向下为正，单位 m。
 
-    默认几何把 DAS 光纤放在道路一侧 ``y=0``，把锤击点放在另一侧
-    ``y=15``，空洞位于道路中部浅层 ``(40, 7.5, 2)``。这不是二维
-    剖面示例，而是 source、receiver、void 三者共同形成的真实三维
-    acquisition geometry。
+    默认几何为：道路长 80 m、宽 15 m；DAS 光纤位于 `y=0 m` 一侧；
+    锤击炮线位于 `y=15 m` 另一侧；空洞中心位于道路中部浅层
+    `void_xyz=(40.0, 7.5, 2.0)`。
     """
 
     road_length_m = 80.0
@@ -44,20 +70,15 @@ def build_stage1_scene() -> dict[str, object]:
     source_y_m = road_width_m
     depth_positive_down = True
 
-    # 第一阶段只需要一个常速度背景，用 Rayleigh 速度占位来模拟浅层面波绕射走时。
-    # 这不是弹性波方程求解，只是为了让三维几何和定位闭环先跑通。
+    # 常速度模型仍服务于运动学走时；后续 Devito/OpenSWPC 会使用三维速度网格。
     velocity_model = VelocityModel3D(vp_mps=900.0, vs_mps=280.0, density_kg_m3=1850.0)
     background_velocity_mps = velocity_model.rayleigh_velocity_mps
 
-    # 锤击点沿道路另一侧布设：x 覆盖整条示例道路，y 固定为道路宽度。
+    # 锤击震源沿道路另一侧排列。source_xyz 是真实三维坐标，不是二维剖面投影。
     source_xs = np.linspace(0.0, road_length_m, 21)
-    source_xyz = tuple(
-        Coordinate3D(float(x), source_y_m, 0.0)
-        for x in source_xs
-    )
+    source_xyz = tuple(Coordinate3D(float(x), source_y_m, 0.0) for x in source_xs)
 
-    # DAS 光纤用三维 polyline 表达，再由 ReceiverPolyline3D 统一采样为通道点。
-    # 不在 main.py 中手工构造 receiver_xyz，避免光纤几何和通道几何不一致。
+    # DAS 光纤用三维折线表达，再统一采样为 receiver_xyz，避免手写通道坐标。
     receiver_polyline = ReceiverPolyline3D(
         points=[
             (0.0, fiber_y_m, 0.0),
@@ -68,11 +89,27 @@ def build_stage1_scene() -> dict[str, object]:
     )
     sampled_receivers = receiver_polyline.sample_channels()
 
-    # 空洞放在道路横向中部的浅层地下，不在光纤正下方。
+    # Stage 1 点异常模型继续用于当前定位闭环；Stage 2A 同步给出体异常表达。
     void_model = VoidModel3D(void_xyz=(40.0, 7.5, 2.0), void_radius_m=1.0)
-    config = ForwardConfig(dt_s=0.001, nt=600, wavelet_frequency_hz=35.0)
+    void_body = VoidBody3D(
+        center_xyz=void_model.void_xyz,
+        body_type="ellipsoid",
+        size_xyz_m=(2.0, 2.0, 1.0),
+        velocity_scale=0.5,
+    )
+    scatterer_proxy_xyz = sample_void_body_as_scatterers(void_body, spacing_m=0.5)
 
-    # 定位网格必须覆盖 x-y-depth 三个方向，尤其 search_y 覆盖道路全宽。
+    # 三维速度网格用于后续真实波动方程正演。本轮只输出模型，不用它调定位误差。
+    base_velocity_grid = build_uniform_road_velocity_grid(
+        road_length_m=road_length_m,
+        road_width_m=road_width_m,
+        max_depth_m=8.0,
+        spacing_m=1.0,
+        background_vp_mps=velocity_model.vp_mps,
+    )
+    velocity_grid = embed_void_body_into_velocity_grid(base_velocity_grid, void_body)
+
+    config = ForwardConfig(dt_s=0.001, nt=600, wavelet_frequency_hz=35.0)
     search_grid = SearchGrid3D(
         search_x=[float(value) for value in np.linspace(25.0, 55.0, 31)],
         search_y=[float(value) for value in np.linspace(0.0, road_width_m, 31)],
@@ -85,18 +122,21 @@ def build_stage1_scene() -> dict[str, object]:
         "source_y_m": source_y_m,
         "depth_positive_down": depth_positive_down,
         "velocity_model": velocity_model,
+        "velocity_grid": velocity_grid,
         "background_velocity_mps": background_velocity_mps,
         "source_xyz": source_xyz,
         "receiver_polyline": receiver_polyline,
         "sampled_receivers": sampled_receivers,
         "void_model": void_model,
+        "void_body": void_body,
+        "scatterer_proxy_xyz": scatterer_proxy_xyz,
         "config": config,
         "search_grid": search_grid,
     }
 
 
 def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, object]:
-    """运行默认三维示例并把图像、数据和 JSON 摘要写入输出目录。"""
+    """运行默认三维示例，并把图像、数据和 JSON 摘要写入输出目录。"""
 
     scene = build_stage1_scene()
     output_path = Path(output_dir)
@@ -106,7 +146,8 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
     receiver_polyline = scene["receiver_polyline"]
     sampled_receivers = scene["sampled_receivers"]
     void_model = scene["void_model"]
-    velocity_model = scene["velocity_model"]
+    void_body = scene["void_body"]
+    velocity_grid = scene["velocity_grid"]
     config = scene["config"]
     search_grid = scene["search_grid"]
     background_velocity_mps = float(scene["background_velocity_mps"])
@@ -115,18 +156,14 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
     fiber_y_m = float(scene["fiber_y_m"])
     source_y_m = float(scene["source_y_m"])
 
-    forward = simulate_kinematic_diffraction(
-        source_xyz=source_xyz,
-        receiver_xyz=sampled_receivers.receiver_xyz,
-        void_xyz=void_model.void_xyz,
-        background_velocity_mps=background_velocity_mps,
-        config=config,
-        scatter_amplitude=8.0,
-    )
+    kinematic_backend = KinematicDiffractionBackend()
+    devito_backend = DevitoBackend()
+    openswpc_backend = OpenSWPCBackend()
+    backend = kinematic_backend
 
-    # 定位阶段对每个候选 (x, y, depth) 计算 source-candidate-receiver 走时，
-    # 再在合成记录相应时间处叠加能量。高目标函数值表示该候选点更能解释
-    # 多炮多道记录中的绕射事件。
+    # 当前默认后端仍使用单点绕射中心。体异常和速度网格是 Stage 2A 的正演升级准备。
+    forward = backend.run_forward(scene, config)
+
     localization = travel_time_energy_stack(
         data=forward.data,
         time_axis_s=forward.time_axis_s,
@@ -138,7 +175,10 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         true_xyz=void_model.void_xyz,
     )
     uncertainty = summarize_objective_uncertainty(localization)
+    wavefield_status = unavailable_wavefield_snapshots(backend.name)
+    ensure_wavefield_output_dir(output_path / "wavefield_snapshots")
 
+    velocity_grid.save_npz(output_path / "velocity_model_3d.npz")
     np.savez_compressed(
         output_path / "synthetic_data.npz",
         data=forward.data,
@@ -169,6 +209,13 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         fiber_y_m=fiber_y_m,
         source_y_m=source_y_m,
     )
+    plot_velocity_model_slices(
+        output_path / "velocity_model_slices.png",
+        velocity_grid=velocity_grid,
+        x_m=void_model.void_xyz.x,
+        y_m=void_model.void_xyz.y,
+        depth_m=void_model.void_xyz.depth,
+    )
     plot_synthetic_gather(
         output_path / "synthetic_gather.png",
         data=forward.data,
@@ -181,6 +228,7 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
     x_error_m = localization.best_xyz.x - void_model.void_xyz.x
     y_error_m = localization.best_xyz.y - void_model.void_xyz.y
     depth_error_m = localization.best_xyz.depth - void_model.void_xyz.depth
+    backend_metadata = dict(forward.metadata)
     summary = {
         "road_length_m": road_length_m,
         "road_width_m": road_width_m,
@@ -189,6 +237,9 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         "depth_positive_down": bool(scene["depth_positive_down"]),
         "true_void_xyz": void_model.void_xyz.xyz,
         "void_radius_m": void_model.void_radius_m,
+        "void_body": void_body.metadata,
+        "void_representation": "point_or_body_proxy",
+        "body_scatterer_proxy_count": len(scene["scatterer_proxy_xyz"]),
         "search_x_range_m": [float(search_grid.search_x[0]), float(search_grid.search_x[-1])],
         "search_y_range_m": [float(search_grid.search_y[0]), float(search_grid.search_y[-1])],
         "search_depth_range_m": [float(search_grid.search_depth[0]), float(search_grid.search_depth[-1])],
@@ -198,6 +249,18 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
             "depth": "向下为正",
             "units": "m",
         },
+        "backend_name": backend_metadata["backend_name"],
+        "physics_type": backend_metadata["physics_type"],
+        "is_wave_equation_solver": backend_metadata["is_wave_equation_solver"],
+        "is_elastic_solver": backend_metadata["is_elastic_solver"],
+        "supports_wavefield_snapshots": backend_metadata["supports_wavefield_snapshots"],
+        "supports_das_strain": backend_metadata["supports_das_strain"],
+        "approximation": backend_metadata["approximation"],
+        "devito_available": devito_backend.is_available(),
+        "openswpc_available": openswpc_backend.is_available(),
+        "wavefield_snapshot_type": wavefield_status.snapshot_type,
+        "is_true_wave_equation_wavefield": wavefield_status.is_true_wave_equation_wavefield,
+        "localization_accuracy_is_primary_metric": False,
         "true_xyz": void_model.void_xyz.xyz,
         "best_xyz": localization.best_xyz.xyz,
         "localization_error_m": localization.localization_error_m,
@@ -211,32 +274,50 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         "data_shape": list(forward.data.shape),
         "objective_shape": list(localization.objective_volume.shape),
         "background_velocity_mps": background_velocity_mps,
+        "velocity_grid": {
+            "shape": list(velocity_grid.shape),
+            "spacing_m": velocity_grid.spacing_m,
+            "metadata": dict(velocity_grid.metadata),
+        },
         "receiver_metadata": sampled_receivers.metadata,
-        "forward_metadata": dict(forward.metadata),
+        "forward_metadata": backend_metadata,
         "localization_metadata": dict(localization.metadata),
+        "wavefield_status": wavefield_status.as_dict(),
         "assumptions": [
-            "当前仅为三维运动学绕射近似",
-            "空洞被简化为单个点绕射体或空洞中心",
-            "当前不是完整三维弹性波方程求解器",
-            "DAS 光纤目前只采样为点接收通道，尚未实现 gauge-length 平均轴向应变",
-            "定位目标函数为 x-y-depth 三维 travel-time energy stack",
+            "当前默认正演后端是三维运动学点绕射近似。",
+            "当前不是完整三维声波或弹性波波动方程正演。",
+            "体异常已能写入速度网格，但运动学后端仍默认使用中心点作为等效绕射体。",
+            "DAS 光纤当前仍是 polyline 采样点接收器近似，不是真实 gauge-length averaged axial strain。",
+            "定位模块用于验证三维几何、数据结构和流程贯通，当前不以定位误差最小为核心验收指标。",
         ],
         "outputs": {
             "geometry_3d": str(output_path / "geometry_3d.png"),
+            "velocity_model_slices": str(output_path / "velocity_model_slices.png"),
             "synthetic_gather": str(output_path / "synthetic_gather.png"),
             "localization_slices": str(output_path / "localization_slices.png"),
+            "velocity_model_3d": str(output_path / "velocity_model_3d.npz"),
             "synthetic_data": str(output_path / "synthetic_data.npz"),
             "localization_objective": str(output_path / "localization_objective.npz"),
+            "wavefield_snapshots_dir": str(output_path / "wavefield_snapshots"),
             "run_summary": str(output_path / "run_summary.json"),
         },
     }
     with (output_path / "run_summary.json").open("w", encoding="utf-8") as file:
-        json.dump(summary, file, indent=2)
+        json.dump(summary, file, indent=2, ensure_ascii=False)
 
     if not quiet:
-        print("第一阶段三维道路地下空洞运动学绕射示例")
+        print("Stage 2A 三维道路 DAS + 锤击地下空洞正演过渡原型")
         print("坐标系统：x 沿道路/光纤，y 横穿道路，depth 向下为正")
-        print(f"道路几何：长度={road_length_m:.1f} m，宽度={road_width_m:.1f} m")
+        print(f"当前正演后端：{summary['backend_name']}")
+        print(f"Devito 可用：{summary['devito_available']}")
+        print(f"OpenSWPC 可用：{summary['openswpc_available']}")
+        print(f"当前异常体表示：{summary['void_representation']}")
+        print(f"当前是否完整波动方程正演：{summary['is_wave_equation_solver']}")
+        print(f"当前是否真实弹性波正演：{summary['is_elastic_solver']}")
+        print(f"当前是否支持真实波场快照：{summary['supports_wavefield_snapshots']}")
+        print(f"当前是否支持真实 DAS 轴向应变：{summary['supports_das_strain']}")
+        print(f"当前定位准确度是否核心指标：{summary['localization_accuracy_is_primary_metric']}")
+        print(f"道路几何：长度 {road_length_m:.1f} m，宽度 {road_width_m:.1f} m")
         print(f"DAS 光纤位于 y={fiber_y_m:.1f} m；锤击炮线位于 y={source_y_m:.1f} m")
         print(f"true_xyz: {summary['true_xyz']}")
         print(f"best_xyz: {summary['best_xyz']}")
@@ -246,6 +327,7 @@ def run(output_dir: str | Path = "outputs", quiet: bool = False) -> dict[str, ob
         print(f"depth_error_m: {summary['depth_error_m']:.3f}")
         print(f"数据维度 n_sources x n_receivers x n_times: {summary['data_shape']}")
         print(f"目标函数维度 x-y-depth: {summary['objective_shape']}")
+        print(f"速度网格维度 x-y-depth: {summary['velocity_grid']['shape']}")
         print(f"不确定性指标: {summary['uncertainty']}")
         print("当前简化假设:")
         for assumption in summary["assumptions"]:

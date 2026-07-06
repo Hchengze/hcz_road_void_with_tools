@@ -1,90 +1,59 @@
-# 算法假设
+# 算法假设与阶段边界
 
-## 1. 当前算法类别
+## 主场景
 
-当前第一阶段流程是三维道路地下空洞的运动学绕射近似。它把空洞简化为单个点绕射体，用三维路径长度计算走时，再用 Ricker 子波生成合成记录。
+本项目主场景始终是三维道路 DAS + 锤击地下空洞探测，不是二维 `x-depth` 剖面问题。
 
-它不是：
+坐标约定：
 
-- 完整三维弹性波正演；
-- 完整声波、黏弹性或孔弹性波动方程求解；
-- FWI；
-- 生产级偏移成像；
-- 真实 DAS 轴向应变模拟。
+- `x`：沿道路或 DAS 光纤方向；
+- `y`：横穿道路方向；
+- `depth`：向下为正；
+- `source_xyz`：锤击震源三维坐标；
+- `receiver_polyline`：DAS 光纤三维折线；
+- `receiver_xyz`：由光纤折线采样得到的三维通道点；
+- `void_xyz`：异常体中心三维坐标。
 
-## 2. 几何假设
+默认场景为道路宽 15 m，DAS 光纤位于 `y=0 m` 一侧，锤击炮线位于 `y=15 m` 另一侧，空洞位于道路中部地下，默认 `void_xyz=(40.0, 7.5, 2.0)`。
 
-- `x` 为沿道路或沿光纤方向；
-- `y` 为横穿道路方向；
-- `depth` 为向下为正的深度；
-- `source_xyz`、`receiver_xyz`、`receiver_polyline` 和 `void_xyz` 始终是三维；
-- 定位网格始终为 `search_x x search_y x search_depth`。
+## 当前正演假设
 
-默认示例为道路宽 `15 m`、长 `80 m`，DAS 光纤位于 `y=0 m` 一侧，锤击炮线位于 `y=15 m` 另一侧，空洞位于道路中部地下，默认 `void_xyz=(40.0, 7.5, 2.0)`。
+当前默认正演后端是 `kinematic`，物理关系为：
 
-光纤和震源不在同一条线上，空洞也不在光纤正下方。由于观测仍然是单侧光纤和对侧锤击，横向 `y` 与深度 `depth` 的混淆仍然可能明显。
+`总走时 = 震源到空洞的传播时间 + 空洞到接收点的传播时间`
 
-## 3. 正演假设
+即：
 
-当前正演使用：
+`t_total = |source_xyz - void_xyz| / v + |void_xyz - receiver_xyz| / v`
 
-```text
-t_total = |source_xyz - void_xyz| / v_background
-        + |void_xyz - receiver_xyz| / v_background
-```
+当前不是完整三维声波或弹性波波动方程正演，没有自由表面、PML、模式转换、真实体散射、多次波、衰减或各向异性。
 
-合成记录是在每个理论走时处放置一个 Ricker 子波，并可选地乘以简单几何扩散衰减。
+## DAS 当前近似
 
-metadata 必须明确：
+当前 DAS 光纤已能用 `receiver_polyline` 表达并采样为 `receiver_xyz`，同时记录 gauge length metadata。但是当前记录仍是点接收器近似，不是真实 gauge-length averaged axial strain。
 
-- `forward_type = "3d_kinematic_diffraction"`；
-- `is_wave_equation_solver = False`；
-- `is_elastic_solver = False`；
-- `is_kinematic_approximation = True`；
-- `approximation = "单点绕射体 / 运动学走时近似"`。
+真实 DAS 轴向应变需要弹性位移场或应变张量，并沿光纤切向量计算：
 
-## 4. DAS/光纤假设
+`epsilon_fiber = t_i * epsilon_ij * t_j`
 
-`ReceiverPolyline3D` 当前实现：
+这个步骤留给后续 Devito elastic 或 OpenSWPC 后端。
 
-- 接收三维 `receiver_polyline`；
-- 按固定 `channel_spacing_m` 采样为 `receiver_xyz`；
-- 计算每个采样点局部切向量；
-- 记录 `gauge_length_m` metadata。
+## 体异常当前近似
 
-当前限制：
+`VoidBody3D` 支持 sphere 和 ellipsoid，并可嵌入三维速度网格。当前多散射点只是体模型代理，不是严格边界散射。后续真实波动方程后端应直接读取体速度模型。
 
-- DAS 通道仍作为点接收器近似；
-- 没有计算 gauge-length 平均轴向应变；
-- 没有应变率转换；
-- 真实 DAS 需要弹性位移场、应变张量和 `e^T epsilon(u)e` 观测算子。
+## 定位目标函数当前假设
 
-## 5. 定位假设
+当前定位使用三维 `x-y-depth` travel-time energy stack。每个候选点都会计算 source-candidate-receiver 理论走时，并从合成记录中提取对应时间附近的能量。目标函数高值表示候选点更能解释多炮多道记录中的绕射事件。
 
-定位目标函数是 travel-time energy stack：
+当前定位模块用于验证三维几何、观测系统、正演数据结构和定位流程是否贯通。当前不以定位误差最小为核心验收指标。正演模型更真实之后，再系统优化定位精度。
 
-1. 对每个候选点 `candidate_xyz=(x, y, depth)`，计算所有 source-candidate-receiver 理论走时；
-2. 在合成记录对应时间附近提取绝对振幅；
-3. 对所有炮道对平均或叠加；
-4. 得到三维目标函数体，维度为 `(nx, ny, ndepth)`。
+## 不确定性当前假设
 
-默认搜索范围为 `x=25..55 m`、`y=0..15 m`、`depth=0.5..5.0 m`，覆盖道路全宽和浅层空洞深度。
+不确定性指标是初步指标，包括 best/second ratio、归一化目标函数、高能区域体积、半高宽和 y-depth 混淆判断。单侧光纤与单侧锤击几何容易造成横向 `y` 和深度 `depth` 混淆，后续应结合真实波形、更多观测孔径或先验约束分析。
 
-## 6. 不确定性假设
+## 后续方向
 
-当前不确定性指标是目标函数体的轻量诊断：
-
-- best/second ratio：峰值是否唯一；
-- half-max 体素数量和比例：高能区域是否宽；
-- x、y、depth 半高宽：不同方向上的定位扩散；
-- y-depth confusion：单侧光纤条件下横向位置和埋深是否混淆。
-
-这些指标不是校准后的置信区间，只用于第一阶段解释和筛查。
-
-## 7. 后续高保真后端
-
-当前几何和 metadata 层为后续外部正演工具预留接口：
-
-- Devito：Python 原生三维 acoustic/elastic 原型；
-- OpenSWPC：成熟 MIT 许可证三维弹性/黏弹性外部求解器；
-- SPECFEM3D 或 SW4：更重的高保真验证工具。
+1. Devito：先接入三维声波方程正演，输出炮集和真实声波场快照。
+2. OpenSWPC：作为外部三维弹性/黏弹性正演程序，推进真实 DAS 轴向应变。
+3. Notebook：每轮算法推进后同步更新，清理旧参数和旧结论，作为项目进度把控入口。
