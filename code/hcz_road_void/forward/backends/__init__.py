@@ -10,6 +10,7 @@ from hcz_road_void.forward.backends.devito_backend import (
     DevitoBackend,
     DevitoForwardConfig,
     DevitoRuntimeStatus,
+    detect_runtime_environment,
     velocity_grid_to_devito_inputs,
 )
 from hcz_road_void.forward.backends.kinematic_backend import KinematicDiffractionBackend
@@ -22,5 +23,6 @@ __all__ = [
     "ForwardBackend",
     "KinematicDiffractionBackend",
     "OpenSWPCBackend",
+    "detect_runtime_environment",
     "velocity_grid_to_devito_inputs",
 ]

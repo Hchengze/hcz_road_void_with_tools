@@ -1,71 +1,145 @@
 # 正演输出约定
 
-Stage 2A 开始把正演输出从单一合成炮集扩展为后续波动方程后端所需的完整目录约定。Stage 2B 新增 Devito acoustic 后端输出约定，但当前 Windows 原生 `myvoid` 尚未通过 Devito runtime smoke test，因此不会提交或展示伪 Devito 波场结果。
+## 总体原则
 
-## 当前输出目录
+本项目的正演输出分为两类：
 
-默认输出到：
+1. 默认 `kinematic`：三维运动学点绕射近似，用于验证三维几何、数据结构、定位流程和不确定性分析。
+2. `devito_acoustic_3d`：Devito 三维 acoustic 标量声波方程后端，用于生成真实波动方程炮集、速度模型切片、波场快照和 GIF。
+
+两类输出都必须明确 metadata，不能把运动学结果说成波动方程结果，也不能把 acoustic 标量波场说成弹性波或真实 DAS 轴向应变。
+
+## 默认输出目录
 
 ```text
 code/outputs/
 ```
 
-当前 `code/outputs/` 已在 `.gitignore` 中排除，不提交到 GitHub。
+该目录默认被 `.gitignore` 排除，不提交到 GitHub。
 
-## 当前文件
+## kinematic 默认输出
 
-1. `geometry_3d.png`：三维道路 DAS + 锤击几何图。
-2. `velocity_model_3d.npz`：三维速度模型，包含 `x_m`、`y_m`、`depth_m`、`vp_mps` 和 metadata。
-3. `velocity_model_slices.png`：速度模型 `x-y`、`x-depth`、`y-depth` 切片。
-4. `synthetic_data.npz`：合成记录和走时表。
-5. `synthetic_gather.png`：单炮 receiver-time 记录图。
-6. `localization_objective.npz`：三维定位目标函数体。
-7. `localization_slices.png`：定位目标函数切片。
-8. `wavefield_snapshots/`：后续真实波场快照目录，当前运动学后端为空或仅作占位。
-9. `run_summary.json`：本次运行摘要。
+运行：
 
-## 当前波场快照状态
+```powershell
+D:\HczApp\Anaconda\envs\myvoid\python.exe main.py
+```
 
-当前默认后端是 `kinematic`，没有真实网格波场变量，因此：
+输出：
+
+```text
+code/outputs/geometry_3d.png
+code/outputs/velocity_model_slices.png
+code/outputs/synthetic_gather.png
+code/outputs/localization_slices.png
+code/outputs/velocity_model_3d.npz
+code/outputs/synthetic_data.npz
+code/outputs/localization_objective.npz
+code/outputs/wavefield_snapshots/
+code/outputs/run_summary.json
+```
+
+其中 `wavefield_snapshots/` 对默认后端只是目录占位，metadata 标注为：
+
+```text
+wavefield_snapshot_type = not_available
+is_true_wave_equation_wavefield = false
+```
+
+原因是运动学后端没有网格波场变量。
+
+## Devito acoustic 输出
+
+推荐在 WSL Linux conda 中运行：
+
+```bash
+cd /home/hcz/projects/hcz_road_void_with_tools/code
+source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
+conda activate hcz_void_devito
+python main.py --backend devito_acoustic_3d
+```
+
+成功输出：
+
+```text
+code/outputs/velocity_model_3d.npz
+code/outputs/velocity_model_slices.png
+code/outputs/devito_synthetic_data.npz
+code/outputs/devito_synthetic_gather.png
+code/outputs/devito_wavefield_snapshots/snapshot_000.png
+code/outputs/devito_wavefield_snapshots/snapshot_001.png
+...
+code/outputs/devito_wavefield_animation.gif
+code/outputs/devito_forward_summary.json
+```
+
+当前 Stage 2C WSL 运行结果：
+
+```text
+runtime_environment = wsl_linux_conda
+backend_name = devito_acoustic_3d
+physics_type = acoustic_wave_equation
+devito_version = 4.8.22
+data_shape = [3, 41, 220]
+snapshot_count = 10
+is_wave_equation_solver = true
+is_elastic_solver = false
+supports_das_strain = false
+is_true_wave_equation_wavefield = true
+```
+
+## devito_forward_summary.json 关键字段
 
 ```json
 {
-  "wavefield_snapshot_type": "not_available",
-  "is_true_wave_equation_wavefield": false
+  "stage": "Stage 2C",
+  "backend_name": "devito_acoustic_3d",
+  "physics_type": "acoustic_wave_equation",
+  "runtime_environment": "wsl_linux_conda",
+  "conda_env_name": "hcz_void_devito",
+  "devito_runtime_state": "runtime_available",
+  "devito_version": "4.8.22",
+  "is_wave_equation_solver": true,
+  "is_elastic_solver": false,
+  "is_true_wave_equation_wavefield": true,
+  "supports_das_strain": false,
+  "velocity_grid_shape": [81, 16, 9],
+  "source_count": 3,
+  "receiver_count": 41,
+  "time_sample_count": 220,
+  "snapshot_count": 10
 }
 ```
 
-后续 Devito/OpenSWPC 接入后，才应输出真实波场快照和动图。
+字段含义：
 
-## Devito acoustic 输出约定
+1. `runtime_environment`：用于区分 Windows、WSL Linux 或其他 Linux conda 环境。
+2. `devito_runtime_state`：Devito 三态诊断标签。
+3. `velocity_grid_shape`：三维速度网格的 `x-y-depth` 维度。
+4. `source_count`、`receiver_count`、`time_sample_count`：炮集数据维度说明。
+5. `snapshot_count`：已写出的真实声波场快照数量。
 
-显式运行：
+## 波场快照说明
 
-```powershell
-D:\HczApp\Anaconda\envs\myvoid\python.exe main.py --backend devito_acoustic_3d
-```
-
-如果 Devito runtime 可用，应输出：
-
-1. `devito_synthetic_data.npz`：Devito acoustic 接收记录；
-2. `devito_synthetic_gather.png`：Devito receiver-time 炮集图；
-3. `devito_wavefield_snapshots/snapshot_000.png` 等：标量声波场快照；
-4. `devito_wavefield_animation.gif`：标量声波场动图；
-5. `devito_forward_summary.json`：Devito 后端运行摘要。
-
-当前本机运行结果：
+Devito 快照为：
 
 ```text
-Devito import_available = True
-Devito runtime_available = False
+snapshot_cube: n_snapshots x nx x ny x ndepth
 ```
 
-因此 `main.py --backend devito_acoustic_3d` 会输出中文错误，并不会生成伪造的 `devito_synthetic_gather.png` 或伪快照。
+当前绘图选择最接近空洞 `y` 位置的 `x-depth` 剖面。图中的物理量是 acoustic scalar field。
 
-## 后续目标
+不是：
 
-1. 在 Devito runtime 可用环境中生成 `devito_wavefield_snapshots/snapshot_000.png` 等真实快照；
-2. 生成 `devito_wavefield_animation.gif`；
-3. 声波后端输出压力或标量波场；
-4. 弹性后端输出位移、速度、应力或应变；
-5. DAS 后处理输出沿光纤方向轴向应变或应变率。
+1. 弹性位移；
+2. 速度矢量；
+3. 应力张量；
+4. DAS gauge-length averaged axial strain。
+
+## 当前限制
+
+1. 默认 `kinematic` 没有真实波场。
+2. Devito acoustic 后端没有 PML/自由表面，边界反射会存在。
+3. Devito acoustic 不是弹性波正演，无法直接输出 DAS 轴向应变。
+4. Stage 2C 只验证小尺度 runtime，不代表工程规模参数。
+5. WSL 输出目录不提交到 GitHub，后续若要保留样例图，应另设轻量示例资产策略。

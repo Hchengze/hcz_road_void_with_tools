@@ -1,8 +1,9 @@
-"""Stage 2B Devito acoustic 后端测试。
+"""Stage 2B/2C Devito acoustic 后端测试。
 
 这些测试刻意区分 “Devito 能 import” 和 “Devito 能真正执行 Operator”。
 当前 Windows 原生 `myvoid` 可能属于前者但不属于后者；项目必须给出清晰诊断，
-并且默认 kinematic 流程仍然可用。
+并且默认 kinematic 流程仍然可用。Stage 2C 在 WSL Linux conda 中验证真实
+Operator runtime；这些测试在没有 Devito runtime 的环境中仍应优雅跳过。
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from hcz_road_void.forward import (
     DevitoBackend,
     DevitoForwardConfig,
     KinematicDiffractionBackend,
+    detect_runtime_environment,
     velocity_grid_to_devito_inputs,
 )
 from hcz_road_void.models import VelocityGrid3D, VoidBody3D, embed_void_body_into_velocity_grid
@@ -32,6 +34,12 @@ def test_devito_backend_runtime_status_is_explicit() -> None:
 
     assert isinstance(status.import_available, bool)
     assert isinstance(status.runtime_available, bool)
+    assert status.state in {
+        "import_unavailable",
+        "import_available_runtime_unavailable",
+        "runtime_available",
+    }
+    assert status.as_dict()["state"] == status.state
     assert isinstance(backend.is_available(), bool)
     if status.import_available:
         assert status.version is not None
@@ -52,6 +60,8 @@ def test_devito_backend_metadata_contains_stage2b_fields() -> None:
         "devito_import_available",
         "runtime_available",
         "devito_version",
+        "runtime_state",
+        "runtime_environment",
         "runtime_message",
     ]:
         assert key in metadata
@@ -60,6 +70,12 @@ def test_devito_backend_metadata_contains_stage2b_fields() -> None:
     assert metadata["is_wave_equation_solver"] is True
     assert metadata["is_elastic_solver"] is False
     assert metadata["supports_das_strain"] is False
+    assert metadata["runtime_state"] in {
+        "import_unavailable",
+        "import_available_runtime_unavailable",
+        "runtime_available",
+    }
+    assert isinstance(detect_runtime_environment(), str)
 
 
 def test_stage2b_devito_documents_exist() -> None:
@@ -67,6 +83,7 @@ def test_stage2b_devito_documents_exist() -> None:
     for name in [
         "DEVITO_INTEGRATION_NOTES.md",
         "DEVITO_3D_ACOUSTIC_BACKEND.md",
+        "DEVITO_LINUX_RUNTIME_GUIDE.md",
         "STAGE2_WAVE_EQUATION_FORWARD_PLAN.md",
         "FORWARD_OUTPUTS.md",
     ]:
@@ -184,6 +201,14 @@ def test_main_devito_backend_cli_is_clear_when_runtime_unavailable(tmp_path) -> 
         summary = json.loads((tmp_path / "devito_forward_summary.json").read_text(encoding="utf-8"))
         assert summary["backend_name"] == "devito_acoustic_3d"
         assert summary["is_wave_equation_solver"] is True
+        assert summary["stage"] == "Stage 2C"
+        assert summary["runtime_environment"]
+        assert summary["devito_runtime_state"] == "runtime_available"
+        assert summary["source_count"] == summary["data_shape"][0]
+        assert summary["receiver_count"] == summary["data_shape"][1]
+        assert summary["time_sample_count"] == summary["data_shape"][2]
+        assert summary["snapshot_count"] >= 1
+        assert len(summary["velocity_grid_shape"]) == 3
     else:
         assert completed.returncode == 2
         assert "运行失败" in completed.stderr

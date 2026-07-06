@@ -1,8 +1,9 @@
 """波场快照接口。
 
 Stage 2A 先建立接口，不生成假装真实的波动方程波场。Stage 2B 新增
-Devito acoustic 标量波场快照保存函数，但只有真实后端 runtime 可用时才会
-写出 PNG/GIF。当前运动学后端没有网格波场变量，只能说明“不可用”。
+Devito acoustic 标量波场快照保存函数；Stage 2C 在 WSL Linux conda 中验证
+Devito runtime 后，才允许写出真实 PNG/GIF。当前运动学后端没有网格波场变量，
+只能说明“不可用”。
 后续 OpenSWPC 或弹性波后端可以继续把位移、速度、应力或应变快照写入这里
 约定的数据结构和输出目录。
 """

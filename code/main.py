@@ -12,6 +12,7 @@
 求解器，也不输出真实波场快照或真实 DAS gauge-length 轴向应变。Stage 2B
 新增 `--backend devito_acoustic_3d` 入口；该入口只有在 Devito import、JIT
 编译和极小 Operator smoke test 全部通过时才会运行真实三维声波正演。
+Stage 2C 已把 Devito runtime 验证主线迁移到 WSL Linux conda 环境。
 """
 
 from __future__ import annotations
@@ -190,7 +191,7 @@ def run(
 
     backend = kinematic_backend
 
-    # 当前默认后端仍使用单点绕射中心。体异常和速度网格服务 Stage 2B Devito 后端准备。
+    # 当前默认后端仍使用单点绕射中心。体异常和速度网格服务 Stage 2C Devito 后端准备。
     forward = backend.run_forward(scene, config)
 
     localization = travel_time_energy_stack(
@@ -341,7 +342,7 @@ def run(
         json.dump(summary, file, indent=2, ensure_ascii=False)
 
     if not quiet:
-        print("Stage 2B 三维道路 DAS + 锤击地下空洞正演过渡原型")
+        print("Stage 2C 三维道路 DAS + 锤击地下空洞正演过渡原型")
         print("坐标系统：x 沿道路/光纤，y 横穿道路，depth 向下为正")
         print(f"当前正演后端：{summary['backend_name']}")
         print(f"Devito 可导入：{summary['devito_import_available']}")
@@ -386,8 +387,9 @@ def _run_devito_scene(
     """运行 Devito acoustic 后端，并保存真实声波炮集和快照。
 
     该函数只在用户显式选择 `--backend devito_acoustic_3d` 时调用。它不运行
-    当前 travel-time energy stack 定位，因为 Stage 2B 的验收重点是正演后端、
-    速度模型、炮集和波场输出，不是定位误差。
+    当前 travel-time energy stack 定位，因为 Stage 2C 的验收重点是 WSL 中的
+    Devito Operator runtime、真实声波正演输出、速度模型、炮集和波场输出，
+    不是定位误差。
     """
 
     if not devito_backend.is_available():
@@ -405,7 +407,7 @@ def _run_devito_scene(
     sampled_receivers = scene["sampled_receivers"]
     source_xyz = scene["source_xyz"]
 
-    # Stage 2B 只跑一个很小的 Devito acoustic 示例。默认选择首炮、中间炮和末炮，
+    # Stage 2C 只跑一个很小的 Devito acoustic 示例。默认选择首炮、中间炮和末炮，
     # 既覆盖道路两端和中部，又避免最小后端第一次运行时间过长。
     source_count = len(source_xyz)
     devito_config = DevitoForwardConfig(
@@ -459,9 +461,12 @@ def _run_devito_scene(
         )
 
     summary = {
-        "stage": "Stage 2B",
+        "stage": "Stage 2C",
         "backend_name": forward_metadata["backend_name"],
         "physics_type": forward_metadata["physics_type"],
+        "runtime_environment": forward_metadata.get("runtime_environment"),
+        "conda_env_name": forward_metadata.get("conda_env_name"),
+        "devito_runtime_state": forward_metadata.get("runtime_state"),
         "is_wave_equation_solver": forward_metadata["is_wave_equation_solver"],
         "is_elastic_solver": forward_metadata["is_elastic_solver"],
         "supports_wavefield_snapshots": forward_metadata["supports_wavefield_snapshots"],
@@ -483,9 +488,13 @@ def _run_devito_scene(
         "void_body": void_body.metadata,
         "uses_velocity_grid": True,
         "uses_void_body": True,
+        "velocity_grid_shape": list(velocity_grid.shape),
         "data_shape": list(forward.data.shape),
         "source_xyz_used": [list(coord) for coord in forward.source_xyz],
+        "source_count": int(forward.data.shape[0]),
         "receiver_count": len(forward.receiver_xyz),
+        "time_sample_count": int(forward.data.shape[2]),
+        "snapshot_count": len(wavefield_status.snapshot_paths),
         "dt_s": devito_config.dt_s,
         "nt": devito_config.nt,
         "localization_accuracy_is_primary_metric": False,
@@ -493,7 +502,7 @@ def _run_devito_scene(
         "assumptions": [
             "Devito 后端是三维 acoustic 标量声波方程正演，不是三维弹性波正演。",
             "当前波场快照是标量声波场，不是真实 DAS 轴向应变。",
-            "Stage 2B 暂不以定位误差为核心验收指标。",
+            "Stage 2C 暂不以定位误差为核心验收指标。",
             "当前最小 Devito 模型未加入 PML、自由表面和真实 DAS gauge-length 算子。",
         ],
         "forward_metadata": forward_metadata,
@@ -512,15 +521,20 @@ def _run_devito_scene(
         json.dump(summary, file, indent=2, ensure_ascii=False)
 
     if not quiet:
-        print("Stage 2B Devito 三维 acoustic 正演")
+        print("Stage 2C Devito 三维 acoustic 正演")
         print("坐标系统：x 沿道路/光纤，y 横穿道路，depth 向下为正")
         print(f"当前正演后端：{summary['backend_name']}")
+        print(f"运行环境：{summary['runtime_environment']}")
+        print(f"Conda 环境：{summary['conda_env_name']}")
+        print(f"Devito runtime 状态：{summary['devito_runtime_state']}")
         print(f"Devito 版本：{summary['devito_version']}")
         print(f"当前是否完整波动方程正演：{summary['is_wave_equation_solver']}")
         print(f"当前是否弹性波正演：{summary['is_elastic_solver']}")
         print(f"当前是否支持真实波场快照：{summary['supports_wavefield_snapshots']}")
         print(f"当前是否支持真实 DAS 轴向应变：{summary['supports_das_strain']}")
         print(f"数据维度 n_sources x n_receivers x n_times: {summary['data_shape']}")
+        print(f"速度网格维度 x-y-depth: {summary['velocity_grid_shape']}")
+        print(f"波场快照数量：{summary['snapshot_count']}")
         print(f"波场快照类型：{summary['wavefield_snapshot_type']}")
         print(f"输出已保存到: {output_path.resolve()}")
 

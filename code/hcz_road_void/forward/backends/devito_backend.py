@@ -21,6 +21,7 @@ Stage 1/2A 的运动学后端只把空洞看成一个点绕射体，并没有求
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -60,8 +61,29 @@ class DevitoRuntimeStatus:
     message: str = ""
     details: Mapping[str, Any] = field(default_factory=dict)
 
+    @property
+    def state(self) -> str:
+        """返回便于程序和文档读取的三态诊断标签。
+
+        Stage 2C 需要把 Devito 状态说得比简单 True/False 更清楚：
+
+        1. `import_unavailable`：连 `import devito` 都不成立；
+        2. `import_available_runtime_unavailable`：能 import，但 JIT/Operator 不能跑；
+        3. `runtime_available`：import、JIT 编译和极小 Operator 都通过。
+
+        这样 Windows 原生 `myvoid` 与 WSL Linux conda 环境可以在同一套代码里
+        优雅分流，不会把“已安装”误写成“可正演”。
+        """
+
+        if not self.import_available:
+            return "import_unavailable"
+        if not self.runtime_available:
+            return "import_available_runtime_unavailable"
+        return "runtime_available"
+
     def as_dict(self) -> dict[str, Any]:
         return {
+            "state": self.state,
             "import_available": self.import_available,
             "runtime_available": self.runtime_available,
             "version": self.version,
@@ -170,6 +192,9 @@ class DevitoBackend(ForwardBackend):
                 "runtime_available": status.runtime_available,
                 "devito_version": status.version,
                 "compiler_path": status.compiler_path,
+                "runtime_state": status.state,
+                "runtime_environment": detect_runtime_environment(),
+                "conda_env_name": os.environ.get("CONDA_DEFAULT_ENV"),
                 "runtime_message": status.message,
                 "wavefield_snapshot_type": "true_wave_equation" if status.runtime_available else "not_available",
                 "is_true_wave_equation_wavefield": status.runtime_available,
@@ -222,7 +247,12 @@ class DevitoBackend(ForwardBackend):
             origin=model_inputs["origin"],
         )
 
-        m = Function(name="m", grid=grid, space_order=0)
+        # `m=1/vp^2` 是速度模型参数。虽然它在物理上不随时间变化，但源注入项
+        # `src * dt^2 / m` 会在稀疏震源位置对 `m` 做插值；若这里使用
+        # `space_order=0`，Devito 的稀疏插值会报 “space order too small”。
+        # 因此让 `m` 与波场使用同一空间阶数，既满足插值要求，也保持模型
+        # 与当前最小 acoustic 方程一致。
+        m = Function(name="m", grid=grid, space_order=devito_config.space_order)
         m.data[:] = 1.0 / np.asarray(velocity_grid.vp_mps, dtype=np.float32) ** 2
 
         time_axis_s = np.arange(devito_config.nt, dtype=float) * devito_config.dt_s
@@ -330,6 +360,36 @@ def velocity_grid_to_devito_inputs(velocity_grid: VelocityGrid3D) -> dict[str, A
         "vp_mps": np.asarray(velocity_grid.vp_mps, dtype=np.float32),
         "axis_order": "x, y, depth",
     }
+
+
+def detect_runtime_environment() -> str:
+    """识别当前 Devito 后端所在的运行环境。
+
+    返回值只用于 metadata 和运行摘要，不参与物理计算。Stage 2C 的关键结论是：
+    Windows 原生 `myvoid` 可继续开发与测试，但 Devito Operator runtime 应优先在
+    WSL/Linux conda 中运行。这里用操作系统、WSL 标志和 conda 环境变量给出
+    稳定、无敏感信息的环境标签。
+    """
+
+    if _is_wsl_linux():
+        return "wsl_linux_conda" if os.environ.get("CONDA_DEFAULT_ENV") else "wsl_linux"
+    system = platform.system().lower()
+    if system == "windows":
+        return "windows_conda" if os.environ.get("CONDA_DEFAULT_ENV") else "windows"
+    if system == "linux":
+        return "linux_conda" if os.environ.get("CONDA_DEFAULT_ENV") else "linux"
+    return system or "unknown"
+
+
+def _is_wsl_linux() -> bool:
+    if platform.system().lower() != "linux":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
 
 
 def _run_devito_smoke_test() -> DevitoRuntimeStatus:

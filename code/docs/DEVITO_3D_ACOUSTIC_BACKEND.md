@@ -2,7 +2,7 @@
 
 ## 后端定位
 
-`devito_acoustic_3d` 是本项目 Stage 2B 新增的三维声波波动方程后端。它的目标是把当前三维道路 DAS + 锤击地下空洞原型，从运动学点绕射过渡到真实波动方程数据结构。
+`devito_acoustic_3d` 是本项目 Stage 2B 建立、Stage 2C 在 WSL Linux 中验证通过的三维声波波动方程后端。它的作用是把三维道路 DAS + 锤击地下空洞原型，从运动学点绕射推进到真实三维波动方程数据结构。
 
 必须强调：
 
@@ -11,33 +11,34 @@
 3. 当前不能直接模拟 DAS gauge-length averaged axial strain；
 4. 当前不以定位误差最小为验收目标。
 
-## 安装方式和版本
+## 运行环境
 
-安装命令：
-
-```powershell
-D:\HczApp\Anaconda\envs\myvoid\python.exe -m pip install devito --index-url https://pypi.org/simple
-D:\HczApp\Anaconda\Scripts\conda.exe install -n myvoid -c conda-forge -y m2w64-toolchain
-```
-
-当前版本：
+当前验证通过的运行环境为：
 
 ```text
-devito 4.8.22
+runtime_environment = wsl_linux_conda
+WSL distro = ubuntu2204
+WSL user = hcz
+conda_env_name = hcz_void_devito
+Devito version = 4.8.22
+compiler_path = /usr/bin/gcc
 ```
 
-## 当前运行状态
+Windows 原生 `myvoid` 仍可 import Devito，但不作为本阶段 Devito Operator runtime 主线。
 
-当前 `myvoid` 可 import Devito，但 Windows 原生环境执行 Devito JIT Operator 仍失败。失败点在 Devito/CodePy/MinGW 编译链，而不是本项目三维几何或速度模型。
+## 安装方式
 
-因此：
+WSL conda 环境安装命令：
 
-```text
-Devito import_available = True
-Devito runtime_available = False
+```bash
+source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
+conda create -n hcz_void_devito python=3.11 -y
+conda activate hcz_void_devito
+python -m pip install --upgrade pip
+python -m pip install devito pytest numpy scipy matplotlib imageio pillow --index-url https://pypi.org/simple
 ```
 
-`DevitoBackend.is_available()` 返回 `False`，表示当前机器还不能真实运行 Devito Operator。
+本轮未保存任何密码，也未把认证信息写入仓库。
 
 ## 输入数据结构
 
@@ -76,6 +77,7 @@ origin
 extent
 spacing
 vp_mps
+axis_order = x, y, depth
 ```
 
 ### 异常体
@@ -125,6 +127,8 @@ metadata 至少包含：
 {
   "backend_name": "devito_acoustic_3d",
   "physics_type": "acoustic_wave_equation",
+  "runtime_environment": "wsl_linux_conda",
+  "runtime_state": "runtime_available",
   "is_wave_equation_solver": true,
   "is_elastic_solver": false,
   "supports_wavefield_snapshots": true,
@@ -132,39 +136,71 @@ metadata 至少包含：
 }
 ```
 
-## 快照和动图
+## main.py 输出
 
-当 runtime 可用时，`main.py --backend devito_acoustic_3d` 会输出：
+在 WSL 中运行：
+
+```bash
+cd /home/hcz/projects/hcz_road_void_with_tools/code
+conda activate hcz_void_devito
+python main.py --backend devito_acoustic_3d
+```
+
+当前成功输出：
 
 ```text
 code/outputs/devito_synthetic_gather.png
+code/outputs/devito_synthetic_data.npz
 code/outputs/devito_wavefield_snapshots/
 code/outputs/devito_wavefield_animation.gif
 code/outputs/devito_forward_summary.json
 ```
 
-快照绘制的是穿过空洞横向位置附近的 `x-depth` 剖面。物理量是 acoustic scalar field，不是弹性位移或 DAS 应变。
-
-## 当前 Windows 原生限制
-
-当前失败诊断：
+`devito_forward_summary.json` 记录：
 
 ```text
-Devito 可导入，但极小 Operator 运行失败。
-codepy.CompileError: module compilation failed
+backend_name = devito_acoustic_3d
+runtime_environment = wsl_linux_conda
+is_wave_equation_solver = true
+is_elastic_solver = false
+is_true_wave_equation_wavefield = true
+supports_das_strain = false
+data_shape = [3, 41, 220]
+snapshot_count = 10
 ```
 
-主要原因：
+## 快照和动图
 
-1. Devito 默认 allocator 依赖 POSIX `posix_memalign`。
-2. Windows Python 没有 `os.getuid`，需临时补丁才可进入 JIT。
-3. MinGW/GCC 已安装后，CodePy 仍把 Windows 路径传成 gcc 无法识别的形式。
+快照绘制的是穿过空洞横向位置附近的 `x-depth` 剖面。物理量是 acoustic scalar field，不是弹性位移或 DAS 应变。
 
-本项目不会伪造 Devito 波场，也不会把失败的占位结果当成真实声波正演。
+当前输出函数：
+
+```python
+save_scalar_wavefield_snapshots(...)
+```
+
+输出目录：
+
+```text
+code/outputs/devito_wavefield_snapshots/snapshot_000.png
+code/outputs/devito_wavefield_snapshots/snapshot_001.png
+...
+code/outputs/devito_wavefield_animation.gif
+```
+
+WSL 中若没有中文字体，Matplotlib 可能出现中文 glyph 警告；这只影响图中文字显示，不影响 Devito Operator 正演结果。后续可在 WSL 安装 CJK 字体或设置项目字体路径。
+
+## 当前限制
+
+1. 当前 acoustic 方程为标量声波近似，不是弹性波。
+2. 当前最小模型没有 PML 或自由表面，边界反射会进入记录。
+3. 当前接收记录仍是点接收器采样，不是真实 DAS gauge-length averaged axial strain。
+4. 当前只选择少量震源做最小 runtime 验证，不代表工程规模模拟。
+5. 当前定位模块暂未使用 Devito 炮集作为主线输入，Stage 2C 不追求定位误差最小。
 
 ## 下一步扩展
 
-1. 在 WSL/Linux 或 Devito Docker 中验证同一 `DevitoBackend`。
-2. Devito acoustic 跑通后，输出真实炮集、快照和 GIF。
-3. 再把 Devito 炮集接入定位模块做对比。
-4. 后续若要模拟 DAS 轴向应变，应扩展到 elastic displacement field 和 strain tensor，或接入 OpenSWPC。
+1. 为 Devito acoustic 后端加入阻尼边界或 PML。
+2. 让输出目录支持多次运行的参数化命名，避免覆盖。
+3. 评估 Devito elastic 或 OpenSWPC，用于位移场、应力场和 DAS 轴向应变。
+4. 在真实波动方程输出稳定后，再把 Devito 炮集接入定位和不确定性模块。

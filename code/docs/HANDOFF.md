@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-当前处于 Stage 2B：从三维运动学绕射原型，继续推进 Devito 3D acoustic 三维声波波动方程后端。
+当前处于 Stage 2C：使用 WSL Linux Anaconda 跑通 Devito 3D acoustic runtime，并生成真实三维声波炮集、标量波场快照和 GIF。
 
-当前默认三维道路场景：
+默认三维道路场景：
 
 - 道路长度：80 m；
 - 道路宽度：15 m；
@@ -23,139 +23,154 @@
 5. 三维运动学点绕射正演已实现。
 6. 三维 `x-y-depth` travel-time energy stack 定位已实现。
 7. DAS polyline 采样和 gauge metadata 已实现，但仍是点接收器近似。
-8. Stage 2A 新增统一 `ForwardBackend` 接口。
-9. Stage 2A 新增 `KinematicDiffractionBackend`、`DevitoBackend`、`OpenSWPCBackend`。
-10. Stage 2A 新增 `VoidBody3D` 和 `VelocityGrid3D`。
-11. Stage 2A 新增速度模型 `.npz` 输出和切片图。
-12. Stage 2A 新增波场快照接口；当前运动学后端明确标注没有真实波场。
-13. Stage 2B 已在 `myvoid` 中安装 `devito 4.8.22`。
-14. Stage 2B 已安装 `m2w64-toolchain`，当前可找到 `gcc.EXE`。
-15. Stage 2B 已实现 `DevitoForwardConfig`、`DevitoRuntimeStatus` 和 `velocity_grid_to_devito_inputs()`。
-16. Stage 2B 已实现 `DevitoBackend.run_forward()` 的最小三维 acoustic 方程路径。
-17. Stage 2B 已新增 `main.py --backend devito_acoustic_3d`。
-18. Stage 2B 已新增 Devito 标量波场快照 PNG/GIF 输出接口。
-19. 当前 Windows 原生 `myvoid` 未通过 Devito 极小 Operator smoke test，因此不生成伪 Devito 炮集或伪波场。
-
-## 本地 tools 二次审计结论
-
-1. Devito：优先候选，Python API 最适合先接入三维声波方程。
-2. OpenSWPC：高保真外部程序候选，适合后续三维弹性/黏弹性与 DAS 应变。
-3. SW4：地表弹性波能力强，可作为外部对照。
-4. SPECFEM3D：物理能力强，但网格和编译成本高。
-5. SAVA、SeisCL：可研究，但 GPL 和编译链较重。
-6. SOFI2D、SPECFEM1D：不是三维主后端，只能作为教学或降维参考。
-
-详细记录见：
-
-- `code/docs/TOOLS_DEEP_DIVE.md`
-- `code/docs/DEVITO_INTEGRATION_NOTES.md`
-- `code/docs/OPENSWPC_INTEGRATION_NOTES.md`
-
-## Devito / OpenSWPC 当前可用性
-
-`myvoid` 中 Devito 当前可 import：
-
-```text
-devito 4.8.22
-```
-
-但 Devito 极小 Operator smoke test 当前失败：
-
-```text
-Devito 可导入，但极小 Operator 运行失败。
-codepy.CompileError: module compilation failed
-```
-
-已确认环境状态：
-
-```text
-Devito import_available = True
-Devito runtime_available = False
-GCC = D:\HczApp\Anaconda\envs\myvoid\Library\mingw-w64\bin\gcc.EXE
-```
-
-主要阻塞点：
-
-1. Windows 原生 Python 无 `os.getuid`；
-2. Devito 默认 allocator 依赖 POSIX `posix_memalign`；
-3. MinGW/GCC 已安装后，CodePy 仍会把 Windows 路径传成 gcc 无法识别的形式。
-
-OpenSWPC 当前未编译，未配置可执行文件。因此 `OpenSWPCBackend.is_available()` 返回 `False`。
-
-本轮没有强行编译 OpenSWPC、SPECFEM3D、SW4、SeisCL 或 SAVA。
-
-## 本轮新增依赖
-
-Devito 安装命令：
-
-```powershell
-D:\HczApp\Anaconda\envs\myvoid\python.exe -m pip install devito --index-url https://pypi.org/simple
-```
-
-GCC/MinGW 工具链安装命令：
-
-```powershell
-D:\HczApp\Anaconda\Scripts\conda.exe install -n myvoid -c conda-forge -y m2w64-toolchain
-```
-
-新增或变动的关键依赖：
-
-1. `devito 4.8.22`
-2. `numpy 2.4.3`
-3. `sympy 1.14.0`
-4. `cgen 2025.1`
-5. `codepy 2023.1`
-6. `py-cpuinfo 9.0.0`
-7. `multidict 6.2.0`
-8. `anytree 2.13.0`
-9. `pytools 2026.1.1`
-10. `siphash24 1.8`
-11. `mpmath 1.3.0`
-12. `m2w64-toolchain 5.3.0` 及其 MinGW/GCC 依赖
+8. 已建立统一 `ForwardBackend` 接口。
+9. 已实现 `KinematicDiffractionBackend`、`DevitoBackend`、`OpenSWPCBackend`。
+10. 已实现 `VoidBody3D` 和 `VelocityGrid3D`。
+11. 已实现速度模型 `.npz` 输出和切片图。
+12. 已实现波场快照接口；运动学后端明确标注没有真实波场。
+13. Windows 原生 `myvoid` 中 Devito 4.8.22 可 import，但 Operator runtime 不作为主线。
+14. WSL Linux conda 环境 `hcz_void_devito` 中 Devito 4.8.22 已通过 Operator smoke test。
+15. WSL 中 `main.py --backend devito_acoustic_3d` 已成功生成真实 acoustic 炮集、波场快照和 GIF。
 
 ## 运行环境
 
-继续使用用户指定环境：
+Windows 开发与默认验证环境：
+
+```text
+D:\HczApp\Anaconda\envs\myvoid\python.exe
+```
+
+WSL Devito runtime 环境：
+
+```text
+WSL distro = ubuntu2204
+WSL user = hcz
+Project path = /home/hcz/projects/hcz_road_void_with_tools
+Anaconda path = /home/hcz/Software/Anaconda
+Conda env = hcz_void_devito
+Devito version = 4.8.22
+Compiler = /usr/bin/gcc
+```
+
+本文件不记录任何密码或交互认证信息。
+
+## 本轮 WSL 安装命令
+
+```bash
+source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
+conda create -n hcz_void_devito python=3.11 -y
+conda activate hcz_void_devito
+python -m pip install --upgrade pip
+python -m pip install devito pytest numpy scipy matplotlib imageio pillow --index-url https://pypi.org/simple
+```
+
+本轮未安装 OpenSWPC、SPECFEM3D、SW4、SeisCL 或 SAVA。WSL 中已有 `gcc`、`g++`、`make`，未执行 `sudo apt install`。
+
+## 新增依赖
+
+WSL `hcz_void_devito` 中新增或确认：
+
+1. `devito 4.8.22`
+2. `pytest 9.1.1`
+3. `numpy 2.4.3`
+4. `scipy 1.17.1`
+5. `matplotlib 3.11.0`
+6. `imageio 2.37.3`
+7. `pillow 12.3.0`
+8. Devito 依赖：`cgen`、`codepy`、`sympy`、`pytools` 等
+
+Windows `myvoid` 上一轮已安装 `devito 4.8.22` 和 `m2w64-toolchain`，但 Windows Devito Operator runtime 仍不作为本阶段验收主线。
+
+## Devito 当前可用性
+
+WSL 中：
+
+```text
+import_available = True
+runtime_available = True
+runtime_state = runtime_available
+devito_version = 4.8.22
+compiler_path = /usr/bin/gcc
+```
+
+Windows 原生 `myvoid` 中：
+
+```text
+import_available = True
+runtime_available = False
+```
+
+主要 Windows 阻塞点仍是 Devito/CodePy/MinGW/JIT 编译链。项目不会伪造 Windows Devito 波场。
+
+OpenSWPC 当前未编译，未配置可执行文件。因此 `OpenSWPCBackend.is_available()` 返回 `False`。
+
+## Stage 2C 输出
+
+WSL 中成功运行：
+
+```bash
+cd /home/hcz/projects/hcz_road_void_with_tools/code
+source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
+conda activate hcz_void_devito
+python main.py --backend devito_acoustic_3d
+```
+
+输出：
+
+```text
+code/outputs/devito_synthetic_gather.png
+code/outputs/devito_forward_summary.json
+code/outputs/devito_wavefield_snapshots/
+code/outputs/devito_wavefield_animation.gif
+```
+
+关键结果：
+
+```text
+backend_name = devito_acoustic_3d
+runtime_environment = wsl_linux_conda
+is_wave_equation_solver = true
+is_elastic_solver = false
+supports_das_strain = false
+is_true_wave_equation_wavefield = true
+data_shape = [3, 41, 220]
+snapshot_count = 10
+```
+
+## 运行验证命令
+
+Windows：
 
 ```powershell
+cd /d E:\HczDocument\BaiduDisk\BaiduSyncdisk\HCZ_work\CodexProject\HCZ_road_void_with_tools\code
 D:\HczApp\Anaconda\envs\myvoid\python.exe main.py
 D:\HczApp\Anaconda\envs\myvoid\python.exe -m pytest -p no:cacheprovider
 ```
 
-不得使用 `mywork` 作为本项目验证环境。
+WSL：
 
-## 本轮运行验证
-
-已运行：
-
-```powershell
-D:\HczApp\Anaconda\envs\myvoid\python.exe main.py
-D:\HczApp\Anaconda\envs\myvoid\python.exe -m pytest -p no:cacheprovider
-D:\HczApp\Anaconda\envs\myvoid\python.exe main.py --backend devito_acoustic_3d
+```bash
+cd /home/hcz/projects/hcz_road_void_with_tools/code
+source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
+conda activate hcz_void_devito
+python main.py --backend devito_acoustic_3d
+python -m pytest -p no:cacheprovider
 ```
-
-结果：
-
-1. 默认 `main.py` 成功运行，当前后端为 `kinematic`。
-2. 默认输出包含 `geometry_3d.png`、`velocity_model_slices.png`、`synthetic_gather.png`、`localization_slices.png` 和 `run_summary.json`。
-3. `pytest` 结果为 `39 passed, 1 skipped`；跳过项为当前环境 Devito runtime 不可用时的真实 acoustic smoke test。
-4. `main.py --backend devito_acoustic_3d` 给出中文失败诊断：Devito 可导入，版本 `4.8.22`，但极小 Operator 运行失败。
 
 ## 当前限制
 
-1. 当前默认正演仍是三维运动学点绕射近似。
-2. Devito acoustic 后端代码已接入，但当前 Windows 原生 `myvoid` runtime 仍不可用。
-3. 当前不是完整三维弹性波正演。
+1. 默认后端仍是三维运动学点绕射近似。
+2. Devito acoustic 后端已经在 WSL 跑通，但它是 acoustic 标量声波，不是弹性波。
+3. 当前 Devito 最小模型没有 PML 或自由表面，边界反射会存在。
 4. 当前 DAS 仍是 polyline 点采样近似，不是真实 gauge-length averaged axial strain。
-5. 当前体异常已能嵌入速度网格，但运动学后端仍默认使用中心点作为等效绕射体。
-6. 当前默认 kinematic 后端没有真实波动方程波场输出。
-7. Devito acoustic 即便跑通，也只是标量声波场，不是弹性位移或应变。
-8. 当前定位准确度不是核心验收指标，不应为了降低误差过拟合目标函数。
+5. 当前体异常已能嵌入速度网格，但尚未做严格边界散射解释。
+6. 当前定位准确度不是核心验收指标，不应为了降低误差过拟合目标函数。
+7. WSL 若缺少中文字体，输出图像标题可能出现 glyph 警告。
 
 ## 下一轮建议
 
-1. 优先在 WSL/Linux 或 Devito 官方 Docker 环境中验证当前 `DevitoBackend`。
-2. 若必须继续 Windows 原生路线，定位 CodePy/MinGW 路径转义和 allocator 问题。
-3. Devito acoustic runtime 通过后，输出真实声波炮集、波场快照和动图。
-4. 再把 Devito 输出接入定位模块做对比，但不要为单个合成例子过拟合。
-5. 后续再考虑 OpenSWPC 外部弹性/黏弹性正演和 DAS 轴向应变。
+1. 为 Devito acoustic 后端加入阻尼边界或 PML。
+2. 将 Devito 输出的炮集作为定位模块可选输入，先做一致性对比，不追求误差最小。
+3. 增加波场快照 `.npz` 数据保存和更多切片类型。
+4. 评估 Devito elastic 或 OpenSWPC 弹性/黏弹性后端，用于真实 DAS 轴向应变。
+5. 解决 WSL 中文字体显示问题，改善图像可读性。
