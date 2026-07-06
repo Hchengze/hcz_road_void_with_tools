@@ -1,0 +1,55 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter 缓存
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# 虚拟环境
+.env
+.venv/
+venv/
+env/
+
+# 日志和临时文件
+*.log
+*.tmp
+*.bak
+
+# 运行输出
+code/outputs/
+code/results/
+outputs/
+results/
+
+# 大型数据文件
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.segy
+*.sgy
+*.dat
+*.bin
+
+# 本地第三方工具源码和版权文献默认不提交
+tools/*
+!tools/README.md
+!tools/.gitkeep
+reference/*
+!reference/README.md
+!reference/.gitkeep
+*.pdf
+
+# 系统文件
+.DS_Store
+Thumbs.db
