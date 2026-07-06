@@ -125,11 +125,42 @@ code/outputs/devito_wavefield_animation.gif
 }
 ```
 
+如果希望 Windows 项目目录直接看到结果，推荐使用：
+
+```bash
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
+```
+
+备用同步脚本：
+
+```bash
+python scripts/sync_outputs.py
+```
+
+该脚本会把 WSL Linux 文件系统中的 `code/outputs/` 复制到 Windows 项目目录的 `code/outputs/`。
+
 ## 当前已知小问题
 
 1. WSL 若没有中文字体，Matplotlib 可能提示缺少中文 glyph；这不影响波动方程求解，只影响图题和坐标轴文字显示。
 2. 当前最小 Devito 模型没有 PML 或自由表面，会产生边界反射。
 3. 当前 acoustic 标量波场不是弹性位移场，不能直接用于真实 DAS 轴向应变。
+
+## 字体处理
+
+WSL 当前没有免密 sudo，因此本轮没有执行系统级 `apt install fonts-noto-cjk`。项目新增统一字体配置：
+
+```python
+configure_chinese_matplotlib()
+```
+
+字体优先级为：
+
+1. Windows：Microsoft YaHei / SimHei / SimSun；
+2. Linux：Noto Sans CJK SC / Noto Sans CJK / WenQuanYi Micro Hei；
+3. WSL：直接注册 `/mnt/c/Windows/Fonts/msyh.ttc`、`simhei.ttf`、`simsun.ttc`；
+4. 最后才退回 DejaVu Sans。
+
+本轮 WSL Devito 输出已通过读取 Windows 字体解决图像中文显示问题，没有把字体文件复制进仓库，也没有写入任何密码。
 
 ## 验证命令
 

@@ -235,6 +235,8 @@ class DevitoBackend(ForwardBackend):
         _validate_coordinates_inside_velocity_grid(sources, velocity_grid, "source_xyz")
         _validate_coordinates_inside_velocity_grid(receivers, velocity_grid, "receiver_xyz")
         _validate_cfl(velocity_grid, devito_config.dt_s)
+        computational_sources = _nudge_points_inside_velocity_grid(sources, velocity_grid)
+        computational_receivers = _nudge_points_inside_velocity_grid(receivers, velocity_grid)
 
         # Devito 对象只在真正运行时导入，避免未安装 Devito 的机器导入本项目失败。
         _prepare_devito_process_environment()
@@ -275,7 +277,7 @@ class DevitoBackend(ForwardBackend):
         )
         src = SparseTimeFunction(name="src", grid=grid, npoint=1, nt=devito_config.nt)
         rec = SparseTimeFunction(name="rec", grid=grid, npoint=len(receivers), nt=devito_config.nt)
-        rec.coordinates.data[:, :] = receivers
+        rec.coordinates.data[:, :] = computational_receivers
         stencil = Eq(u.forward, solve(m * u.dt2 - u.laplace, u.forward))
         src_term = src.inject(field=u.forward, expr=src * devito_config.dt_s**2 / m)
         rec_term = rec.interpolate(expr=u)
@@ -285,13 +287,16 @@ class DevitoBackend(ForwardBackend):
             time_axis_s - 1.5 / devito_config.wavelet_frequency_hz,
             devito_config.wavelet_frequency_hz,
         ).astype(np.float32)
-        for isource, source in enumerate(sources):
+        for isource, source in enumerate(computational_sources):
             u.data[:] = 0.0
             rec.data[:] = 0.0
             src.data[:] = 0.0
             src.coordinates.data[0, :] = source
             src.data[:, 0] = wavelet
-            operator.apply(time_m=devito_config.nt - 2, dt=devito_config.dt_s)
+            # Devito 的时间循环参数中，`time_m` 是起始下标，`time_M` 才是结束下标。
+            # 之前误把 `time_m` 当成步数，会导致算子几乎只执行初始时间附近的一步，
+            # 震源主能量尚未注入，接收记录和快照看起来全零。
+            operator.apply(time_M=devito_config.nt - 2, dt=devito_config.dt_s)
             data[isource, :, :] = np.asarray(rec.data.T, dtype=np.float32)
             if isource == 0:
                 snapshot_cube = np.asarray(u.data[snapshot_indices, :, :, :], dtype=np.float32).copy()
@@ -312,6 +317,12 @@ class DevitoBackend(ForwardBackend):
                 "source_indices": [int(index) for index in selected_indices],
                 "source_count_used": int(len(sources)),
                 "receiver_count": int(len(receivers)),
+                "devito_coordinate_note": (
+                    "Devito 最小后端会把位于计算域边界的震源/接收点向网格内部偏移一个网格间距，"
+                    "避免稀疏插值点落在边界导致记录全零；物理场景原始坐标仍保存在 source_xyz/receiver_xyz。"
+                ),
+                "devito_computational_source_xyz": computational_sources.astype(float).tolist(),
+                "devito_computational_receiver_xyz": computational_receivers.astype(float).tolist(),
                 "uses_velocity_grid": True,
                 "uses_void_body_velocity_perturbation": bool(velocity_grid.metadata.get("contains_void_body", False)),
                 "boundary_condition": "未加入 PML/自由表面；最小模型会有边界反射",
@@ -516,7 +527,7 @@ def _execute_tiny_devito_operator() -> None:
         )
         u.data[0, 4, 4, 4] = 1.0
         operator = Operator(Eq(u.forward, 0.5 * u + 0.25 * u.backward), opt="noop")
-        operator.apply(time_m=1, dt=0.001)
+        operator.apply(time_M=1, dt=0.001)
         if not np.isfinite(np.asarray(u.data)).all():
             raise RuntimeError("Devito smoke test 结果出现非有限数。")
     finally:
@@ -589,6 +600,27 @@ def _validate_coordinates_inside_velocity_grid(points: np.ndarray, grid: Velocit
     maxs = np.array([grid.x_m[-1], grid.y_m[-1], grid.depth_m[-1]], dtype=float)
     if np.any(points < mins) or np.any(points > maxs):
         raise ValueError(f"{name} 必须落在 VelocityGrid3D 覆盖范围内。")
+
+
+def _nudge_points_inside_velocity_grid(points: np.ndarray, grid: VelocityGrid3D) -> np.ndarray:
+    """把位于计算域边界的稀疏点向内部偏移一个网格间距。
+
+    道路场景中的锤击点和 DAS 光纤都在地表，很多坐标正好落在
+    `depth=0`、`y=0`、`y=road_width` 或道路端点上。Devito 的
+    `SparseTimeFunction` 需要在稀疏点附近做空间插值；点落在边界时，
+    当前最小后端没有 PML/自由表面和专门边界插值处理，可能导致记录全零。
+
+    这里不改变项目物理几何，只给 Devito 数值计算使用一份“内部化坐标”，
+    并把这件事写入 metadata。后续加入自由表面/PML 后，应重新审视这个偏移。
+    """
+
+    devito_inputs = velocity_grid_to_devito_inputs(grid)
+    spacing = np.asarray(devito_inputs["spacing"], dtype=float)
+    mins = np.array([grid.x_m[0], grid.y_m[0], grid.depth_m[0]], dtype=float) + spacing
+    maxs = np.array([grid.x_m[-1], grid.y_m[-1], grid.depth_m[-1]], dtype=float) - spacing
+    if np.any(maxs <= mins):
+        raise ValueError("VelocityGrid3D 至少需要每个方向包含三个网格间隔，才能偏移边界稀疏点。")
+    return np.clip(np.asarray(points, dtype=np.float32), mins.astype(np.float32), maxs.astype(np.float32))
 
 
 def _validate_cfl(velocity_grid: VelocityGrid3D, dt_s: float) -> None:

@@ -154,6 +154,20 @@ runtime_environment = wsl_linux_conda
 
 输出目录仍被 `.gitignore` 排除，不提交到 GitHub。
 
+Stage 2C.1 推荐直接把 WSL Devito 输出写入 Windows 项目目录：
+
+```bash
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
+```
+
+如果已经在 WSL Linux 文件系统中生成过结果，可用 `python scripts/sync_outputs.py` 同步到 Windows `code/outputs/`。
+
+## Notebook 和中文字体
+
+Stage 2C.1 已修复 Notebook 中文被写成问号的问题，并新增 `code/notebooks/assets/` 小图目录，保证 GitHub 上也能看到关键结果图。
+
+WSL 当前没有免密 sudo，未进行系统级字体安装。项目新增 `configure_chinese_matplotlib()`，优先查找 Noto CJK；若未安装，则在 WSL 中注册 Windows 字体 `/mnt/c/Windows/Fonts/msyh.ttc`、`simhei.ttf`、`simsun.ttc`。本轮重新生成 Devito 图像时未再出现中文 glyph 警告。
+
 ## 当前不做
 
 1. 不把 acoustic 标量波场说成弹性波位移场。

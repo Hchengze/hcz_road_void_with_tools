@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from hcz_road_void.models.velocity_grid import VelocityGrid3D
-from hcz_road_void.visualization.plots import _configure_fonts
+from hcz_road_void.visualization.fonts import configure_chinese_matplotlib
 
 
 def plot_velocity_model_slices(
@@ -32,7 +32,7 @@ def plot_velocity_model_slices(
     默认切片取网格中部；如果传入体异常中心坐标，则可直接穿过低速空洞体。
     """
 
-    _configure_fonts()
+    configure_chinese_matplotlib()
     ix = _nearest_index(velocity_grid.x_m, x_m)
     iy = _nearest_index(velocity_grid.y_m, y_m)
     iz = _nearest_index(velocity_grid.depth_m, depth_m)

@@ -169,13 +169,16 @@ def test_devito_backend_can_use_velocity_grid_and_void_body_when_runtime_availab
     }
     result = backend.run_forward(
         scene,
-        DevitoForwardConfig(dt_s=0.00025, nt=24, wavelet_frequency_hz=60.0, snapshot_interval=8),
+        DevitoForwardConfig(dt_s=0.00025, nt=120, wavelet_frequency_hz=70.0, snapshot_interval=20),
     )
 
-    assert result.data.shape == (1, 2, 24)
+    assert result.data.shape == (1, 2, 120)
+    assert np.max(np.abs(result.data)) > 0.0
     assert result.metadata["backend_name"] == "devito_acoustic_3d"
     assert result.metadata["is_wave_equation_solver"] is True
     assert result.metadata["is_elastic_solver"] is False
+    snapshot_cube = result.metadata["wavefield_snapshot_array"]
+    assert np.max(np.abs(snapshot_cube)) > 0.0
 
 
 def test_main_devito_backend_cli_is_clear_when_runtime_unavailable(tmp_path) -> None:

@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from hcz_road_void.visualization.plots import _configure_fonts
+from hcz_road_void.visualization.fonts import configure_chinese_matplotlib
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ def save_scalar_wavefield_snapshots(
     也不是 DAS 沿光纤方向轴向应变。
     """
 
-    _configure_fonts()
+    configure_chinese_matplotlib()
     cube = np.asarray(snapshot_cube, dtype=float)
     if cube.ndim != 4:
         raise ValueError("snapshot_cube 必须是 n_snapshots x nx x ny x ndepth。")

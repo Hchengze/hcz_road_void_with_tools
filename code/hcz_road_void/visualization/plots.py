@@ -15,26 +15,14 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 import numpy as np
 
 from hcz_road_void.geometry import Coordinate3D, ensure_coordinate3d
 from hcz_road_void.localization import LocalizationResult3D, extract_objective_slices
+from hcz_road_void.visualization.fonts import configure_chinese_matplotlib
 
 
-def _configure_fonts() -> None:
-    """配置中文字体 fallback，避免图题和图例显示为方框。"""
-
-    candidates = ("Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "Arial Unicode MS")
-    available = {font.name for font in font_manager.fontManager.ttflist}
-    for candidate in candidates:
-        if candidate in available:
-            plt.rcParams["font.sans-serif"] = [candidate, "DejaVu Sans"]
-            break
-    plt.rcParams["axes.unicode_minus"] = False
-
-
-_configure_fonts()
+configure_chinese_matplotlib()
 
 
 def plot_geometry_3d(
@@ -111,6 +99,7 @@ def plot_synthetic_gather(
     time_axis_s: Sequence[float],
     receiver_xyz: Sequence[Coordinate3D | Sequence[float]],
     source_index: int = 0,
+    title: str | None = None,
 ) -> None:
     """绘制单炮合成记录。
 
@@ -141,7 +130,7 @@ def plot_synthetic_gather(
     )
     ax.set_xlabel("DAS 采样通道编号")
     ax.set_ylabel("时间 (s)")
-    ax.set_title(f"三维运动学绕射合成炮集，震源 {source_index}")
+    ax.set_title(title or f"三维运动学绕射合成炮集，震源 {source_index}")
     fig.tight_layout()
     _save(fig, output_path)
 

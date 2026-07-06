@@ -101,6 +101,8 @@ receiver_xyz
 
 二者均为 `(x, y, depth)` 三维坐标。`receiver_xyz` 通常来自 `ReceiverPolyline3D.sample_channels()`，代表 DAS 光纤采样点的点接收器近似。
 
+当前最小 Devito 后端没有自由表面和专门边界稀疏插值处理。若震源或接收点正好落在计算域边界，例如 `depth=0` 或 `y=0/road_width`，后端会把 Devito 内部计算坐标向网格内部偏移一个网格间距，并在 metadata 中记录 `devito_computational_source_xyz` 和 `devito_computational_receiver_xyz`。项目物理几何仍保留原始 `source_xyz` 和 `receiver_xyz`。
+
 ## 输出数据结构
 
 后端统一返回：
@@ -143,7 +145,7 @@ metadata 至少包含：
 ```bash
 cd /home/hcz/projects/hcz_road_void_with_tools/code
 conda activate hcz_void_devito
-python main.py --backend devito_acoustic_3d
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
 ```
 
 当前成功输出：
@@ -188,15 +190,16 @@ code/outputs/devito_wavefield_snapshots/snapshot_001.png
 code/outputs/devito_wavefield_animation.gif
 ```
 
-WSL 中若没有中文字体，Matplotlib 可能出现中文 glyph 警告；这只影响图中文字显示，不影响 Devito Operator 正演结果。后续可在 WSL 安装 CJK 字体或设置项目字体路径。
+WSL 中若没有中文字体，Matplotlib 可能出现中文 glyph 警告；这只影响图中文字显示，不影响 Devito Operator 正演结果。Stage 2C.1 已新增统一字体配置，会优先使用 Noto CJK，也会在 WSL 中直接注册 Windows 挂载字体 `/mnt/c/Windows/Fonts/msyh.ttc` 等。
 
 ## 当前限制
 
 1. 当前 acoustic 方程为标量声波近似，不是弹性波。
 2. 当前最小模型没有 PML 或自由表面，边界反射会进入记录。
-3. 当前接收记录仍是点接收器采样，不是真实 DAS gauge-length averaged axial strain。
-4. 当前只选择少量震源做最小 runtime 验证，不代表工程规模模拟。
-5. 当前定位模块暂未使用 Devito 炮集作为主线输入，Stage 2C 不追求定位误差最小。
+3. 当前边界震源/接收点会在 Devito 内部偏移一个网格间距，这是最小后端的数值保护，不是最终自由表面处理。
+4. 当前接收记录仍是点接收器采样，不是真实 DAS gauge-length averaged axial strain。
+5. 当前只选择少量震源做最小 runtime 验证，不代表工程规模模拟。
+6. 当前定位模块暂未使用 Devito 炮集作为主线输入，Stage 2C 不追求定位误差最小。
 
 ## 下一步扩展
 

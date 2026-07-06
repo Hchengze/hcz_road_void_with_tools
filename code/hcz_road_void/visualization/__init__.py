@@ -1,5 +1,6 @@
 """三维道路空洞场景可视化接口。"""
 
+from hcz_road_void.visualization.fonts import configure_chinese_matplotlib
 from hcz_road_void.visualization.plots import (
     plot_geometry_3d,
     plot_localization_slices,
@@ -17,6 +18,7 @@ from hcz_road_void.visualization.wavefield import (
 __all__ = [
     "SceneBounds3D",
     "WavefieldSnapshotResult",
+    "configure_chinese_matplotlib",
     "ensure_wavefield_output_dir",
     "plot_geometry_3d",
     "plot_localization_slices",

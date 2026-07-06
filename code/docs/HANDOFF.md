@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-当前处于 Stage 2C：使用 WSL Linux Anaconda 跑通 Devito 3D acoustic runtime，并生成真实三维声波炮集、标量波场快照和 GIF。
+当前处于 Stage 2C.1：先修正 Stage 2C 的使用体验问题，包括 WSL Devito 输出同步到 Windows `code/outputs/`，以及 Notebook 中文和图片可读性。
 
 默认三维道路场景：
 
@@ -31,6 +31,9 @@
 13. Windows 原生 `myvoid` 中 Devito 4.8.22 可 import，但 Operator runtime 不作为主线。
 14. WSL Linux conda 环境 `hcz_void_devito` 中 Devito 4.8.22 已通过 Operator smoke test。
 15. WSL 中 `main.py --backend devito_acoustic_3d` 已成功生成真实 acoustic 炮集、波场快照和 GIF。
+16. Stage 2C.1 已支持通过 `--output-dir` 把 WSL Devito 输出直接写入 Windows 项目 `code/outputs/`。
+17. Stage 2C.1 已新增 `code/notebooks/assets/`，让 GitHub Notebook 能显示关键小图。
+18. Stage 2C.1 已修复 Devito 时间循环参数，避免 Operator 只跑初始步导致炮集和快照全零。
 
 ## 运行环境
 
@@ -112,7 +115,7 @@ WSL 中成功运行：
 cd /home/hcz/projects/hcz_road_void_with_tools/code
 source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
 conda activate hcz_void_devito
-python main.py --backend devito_acoustic_3d
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
 ```
 
 输出：
@@ -135,7 +138,35 @@ supports_das_strain = false
 is_true_wave_equation_wavefield = true
 data_shape = [3, 41, 220]
 snapshot_count = 10
+devito_synthetic_data_nonzero = true
 ```
+
+Stage 2C.1 已修正 WSL 输出查看问题：Devito 后端可以通过 `--output-dir` 直接把结果写入 Windows 项目目录 `code/outputs/`。备用同步脚本为：
+
+```bash
+cd /home/hcz/projects/hcz_road_void_with_tools/code
+python scripts/sync_outputs.py
+```
+
+`code/outputs/` 仍由 `.gitignore` 排除，不提交到 GitHub。
+
+## Notebook 和字体状态
+
+Stage 2C.1 已重建主 Notebook：
+
+```text
+code/notebooks/road_void_3d_forward_and_localization.ipynb
+```
+
+修正内容：
+
+1. 清除上一版中文被写成问号的问题；
+2. Notebook 改为进度把控为主、必要教学为辅；
+3. 新增可提交的小图目录 `code/notebooks/assets/`；
+4. Notebook 引用 `assets/` 中的小图，GitHub 上也能看到关键结果；
+5. 完整运行输出仍保存在本地 `code/outputs/`。
+
+WSL 当前没有免密 sudo，未执行系统级字体安装。项目改为在 `configure_chinese_matplotlib()` 中优先使用 Noto CJK，如果没有 Noto CJK，则在 WSL 中直接注册 `/mnt/c/Windows/Fonts/msyh.ttc`、`simhei.ttf`、`simsun.ttc` 等 Windows 中文字体。这样不需要把字体复制进仓库，也不会写入任何密码。
 
 ## 运行验证命令
 
@@ -147,25 +178,29 @@ D:\HczApp\Anaconda\envs\myvoid\python.exe main.py
 D:\HczApp\Anaconda\envs\myvoid\python.exe -m pytest -p no:cacheprovider
 ```
 
+Stage 2C.1 结果：`41 passed, 1 skipped`。
+
 WSL：
 
 ```bash
 cd /home/hcz/projects/hcz_road_void_with_tools/code
 source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
 conda activate hcz_void_devito
-python main.py --backend devito_acoustic_3d
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
 python -m pytest -p no:cacheprovider
 ```
+
+Stage 2C.1 结果：`42 passed`。
 
 ## 当前限制
 
 1. 默认后端仍是三维运动学点绕射近似。
 2. Devito acoustic 后端已经在 WSL 跑通，但它是 acoustic 标量声波，不是弹性波。
 3. 当前 Devito 最小模型没有 PML 或自由表面，边界反射会存在。
-4. 当前 DAS 仍是 polyline 点采样近似，不是真实 gauge-length averaged axial strain。
-5. 当前体异常已能嵌入速度网格，但尚未做严格边界散射解释。
-6. 当前定位准确度不是核心验收指标，不应为了降低误差过拟合目标函数。
-7. WSL 若缺少中文字体，输出图像标题可能出现 glyph 警告。
+4. 当前 Devito 内部会把落在边界的震源/接收点偏移一个网格间距，以避免最小后端稀疏插值记录全零；这不是最终自由表面方案。
+5. 当前 DAS 仍是 polyline 点采样近似，不是真实 gauge-length averaged axial strain。
+6. 当前体异常已能嵌入速度网格，但尚未做严格边界散射解释。
+7. 当前定位准确度不是核心验收指标，不应为了降低误差过拟合目标函数。
 
 ## 下一轮建议
 

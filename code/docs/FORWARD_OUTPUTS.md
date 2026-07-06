@@ -56,7 +56,19 @@ is_true_wave_equation_wavefield = false
 cd /home/hcz/projects/hcz_road_void_with_tools/code
 source /home/hcz/Software/Anaconda/etc/profile.d/conda.sh
 conda activate hcz_void_devito
-python main.py --backend devito_acoustic_3d
+python main.py --backend devito_acoustic_3d --output-dir /mnt/e/HczDocument/BaiduDisk/BaiduSyncdisk/HCZ_work/CodexProject/HCZ_road_void_with_tools/code/outputs
+```
+
+这样结果会直接写到 Windows 项目目录：
+
+```text
+E:\HczDocument\BaiduDisk\BaiduSyncdisk\HCZ_work\CodexProject\HCZ_road_void_with_tools\code\outputs
+```
+
+如果已经在 WSL Linux 文件系统的 `code/outputs/` 中生成过结果，也可以用备用脚本同步：
+
+```bash
+python scripts/sync_outputs.py
 ```
 
 成功输出：
@@ -143,3 +155,23 @@ snapshot_cube: n_snapshots x nx x ny x ndepth
 3. Devito acoustic 不是弹性波正演，无法直接输出 DAS 轴向应变。
 4. Stage 2C 只验证小尺度 runtime，不代表工程规模参数。
 5. WSL 输出目录不提交到 GitHub，后续若要保留样例图，应另设轻量示例资产策略。
+
+## Notebook 轻量图片资产
+
+为保证 GitHub 上的 Notebook 也能看到关键图，本项目允许提交少量小尺寸图片到：
+
+```text
+code/notebooks/assets/
+```
+
+当前包含：
+
+1. `geometry_3d.png`
+2. `velocity_model_slices.png`
+3. `synthetic_gather.png`
+4. `localization_slices.png`
+5. `devito_synthetic_gather.png`
+6. `devito_wavefield_snapshot_example.png`
+7. `devito_wavefield_animation.gif`
+
+这些只是轻量展示资产；完整数据和运行输出仍在 `code/outputs/`，不提交。

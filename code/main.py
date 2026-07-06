@@ -252,6 +252,7 @@ def run(
         time_axis_s=forward.time_axis_s,
         receiver_xyz=sampled_receivers.receivers,
         source_index=0,
+        title="三维运动学绕射合成炮集，震源 0",
     )
     plot_localization_slices(output_path / "localization_slices.png", localization)
 
@@ -443,6 +444,7 @@ def _run_devito_scene(
         time_axis_s=forward.time_axis_s,
         receiver_xyz=sampled_receivers.receivers,
         source_index=0,
+        title="Devito 三维声波方程合成炮集，震源 0",
     )
 
     if snapshot_cube is None or snapshot_times_s is None:
